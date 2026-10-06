@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-05T00:00:00.000Z",
+  "items": {
+    ".": {
+      "id": "42bfa10c-4ba3-46b8-a912-0512327a1644",
+      "tags": ["category:animal"]
+    },
+    "Articulated Octopus.3mf": {
+      "id": "a8f4bea2-533d-45e0-afab-32945b06a904",
+      "tags": ["category:animal", "style:flexi"],
+      "notes": "Synthetic unprinted model."
+    },
+    "Missing Fox.stl": {
+      "id": "848335db-09e0-4436-a47a-0c297d7f04b6",
+      "tags": ["category:animal", "status:printed"]
+    }
+  }
+}

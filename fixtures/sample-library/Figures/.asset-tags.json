@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-05T00:00:00.000Z",
+  "items": {
+    "Flexi Dragon.3mf": {
+      "id": "76bfd01c-2055-43b1-996a-c3f9f4ab8f7e",
+      "tags": ["category:animal", "status:printed", "style:flexi", "theme:fantasy"],
+      "notes": "Works well in PLA."
+    }
+  }
+}

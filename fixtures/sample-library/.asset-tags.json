@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-05T00:00:00.000Z",
+  "items": {
+    ".": {
+      "id": "bb4e208d-7415-4ba7-9d7d-92192611f6f8",
+      "tags": ["collection:3d-models"],
+      "notes": "Synthetic test library; model files are inert text placeholders."
+    }
+  }
+}
