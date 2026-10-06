@@ -17,7 +17,7 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
     isDesktop: true,
     load: vi.fn().mockResolvedValue(registered), choose: vi.fn().mockResolvedValue(null),
     activate: vi.fn().mockResolvedValue(registered), remove: vi.fn().mockResolvedValue({ libraries: [], activeLibraryId: null }),
-    scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId })),
+    scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId })), cancelScan: vi.fn().mockResolvedValue(true),
     editTags: vi.fn(async (_libraryId, _assetId, _revision, addTags) => ({ ...scanResult.assets[0], tags: addTags, metadataId: "new-uuid", metadataRevision: "rev2", metadataState: "valid" as const, status: "ready" as const })),
     bulkEditTags: vi.fn().mockResolvedValue({ assets: [], error: null }),
     saveSearch: vi.fn().mockResolvedValue(registered), deleteSearch: vi.fn().mockResolvedValue(registered),
@@ -68,6 +68,19 @@ describe("native library lifecycle", () => {
     const { result } = renderHook(() => useLibrary(api));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toEqual({ message: "Settings unreadable", path: "/app/settings.json", details: "invalid JSON" });
+  });
+  it("cancels the active scan, discards partial results and ignores its late completion", async () => {
+    const pending = deferred<ScanResult>();
+    const api = client({ scan: vi.fn(() => pending.promise) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.scanning).toBe(true));
+    await act(async () => { expect(await result.current.cancelScan()).toBe(true); });
+    expect(api.cancelScan).toHaveBeenCalledWith("root1", expect.any(String));
+    expect(result.current.scanning).toBe(false);
+    expect(result.current.assets).toEqual([]);
+    await act(async () => { pending.resolve(scanResult); });
+    expect(result.current.assets).toEqual([]);
+    expect(result.current.scanning).toBe(false);
   });
   it("ignores stale scan results after library removal", async () => {
     const pending = deferred<ScanResult>();

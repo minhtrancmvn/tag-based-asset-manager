@@ -20,6 +20,7 @@ pub fn run() {
             backend::activate_library,
             backend::remove_library,
             backend::scan_library,
+            backend::cancel_scan,
             backend::edit_tags,
             backend::bulk_edit_tags,
             backend::upsert_saved_search,

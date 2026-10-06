@@ -30,6 +30,10 @@ describe("native DTO bridge", () => {
     mocks.channels[0].onmessage?.({ libraryId: "root1", scanId: "scan1", visited: 128 });
     expect(progress).toHaveBeenCalledWith({ libraryId: "root1", scanId: "scan1", visited: 128 });
   });
+  it("requests cancellation by library and scan ID only", async () => {
+    await nativeClient.cancelScan("root1", "scan1");
+    expect(mocks.invoke).toHaveBeenCalledWith("cancel_scan", { libraryId: "root1", scanId: "scan1" });
+  });
   it("sends only ID and revision for sidecar tag edit", async () => {
     await nativeClient.editTags("root1", "path:Figures/Dragon.3mf", "revision1", ["style:flexi"], ["status:printed"]);
     expect(mocks.invoke).toHaveBeenCalledWith("edit_tags", { libraryId: "root1", assetId: "path:Figures/Dragon.3mf", expectedRevision: "revision1", addTags: ["style:flexi"], removeTags: ["status:printed"] });

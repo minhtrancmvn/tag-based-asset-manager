@@ -58,6 +58,13 @@ button:focus-visible, input:focus-visible, tr:focus-visible { outline: 2px solid
 .library-info strong { overflow: hidden; color: #f3f1e8; font-size: 11px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .library-info small { color: #aebfb0; font-size: 10px; white-space: nowrap; }
 .nav-section-label { margin: 27px 11px 9px; color: #aebfaf; }
+.folder-breadcrumbs { display: flex; align-items: center; min-width: 0; margin: 8px 11px 0; overflow: hidden; color: #b8c9ba; font-size: 11px; white-space: nowrap; }
+.sidebar-scroll > .folder-breadcrumbs { margin-top: -21px; margin-bottom: 14px; }
+.folder-breadcrumbs button { min-width: 0; padding: 2px 0; overflow: hidden; border: 0; background: transparent; color: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.folder-breadcrumbs button:hover:not(:disabled) { color: #fffaf2; text-decoration: underline; }
+.folder-breadcrumbs button[aria-current="location"] { color: #f1d39c; }
+.breadcrumb-segment { display: flex; align-items: center; min-width: 0; gap: 6px; }
+.breadcrumb-segment > span { padding: 0 6px; color: #82998a; }
 .section-between { display: flex; align-items: center; justify-content: space-between; margin-top: 26px; }
 .section-note { font-size: 9px; color: #aebfaf; }
 .tiny-icon { display: grid; place-items: center; padding: 1px; color: #95a99c; background: none; border: 0; }
@@ -115,6 +122,8 @@ h1 { margin: 0; font-family: "Barlow Condensed", "Noto Sans", sans-serif; font-s
 .operation-notice { display: flex; align-items: center; flex-wrap: wrap; min-height: 34px; padding: 6px 14px; gap: 7px; border-bottom: 1px solid #dbe5d6; background: #f0f5ed; color: #49694e; font-size: 10px; }.operation-notice strong { font-weight: 600; }.operation-notice code { overflow-wrap: anywhere; color: #586c5a; font: 400 9px "IBM Plex Mono", monospace; }.operation-notice span { margin-left: auto; color: #768675; font-size: 9px; }
 .scan-progress { display: flex; align-items: center; min-height: 35px; padding: 0 16px; gap: 9px; border-bottom: 1px solid #e3e3db; background: #f0f5ed; color: #526d55; font-size: 11px; }
 .scan-progress strong { margin-left: auto; font: 500 10px "IBM Plex Mono", monospace; }
+.scan-cancel-button { display: inline-flex; align-items: center; min-height: 26px; margin-left: 10px; padding: 0 8px; gap: 5px; border: 1px solid #d3d9ce; border-radius: 4px; background: #faf8f3; color: #8c4b39; font-size: 10px; }
+.scan-cancel-button:hover { border-color: #c48c77; background: #fff4ee; }
 .progress-spinner { width: 13px; height: 13px; border: 2px solid #b7c9b6; border-top-color: #4f7757; border-radius: 50%; animation: scan-spin .8s linear infinite; }
 .issues-panel { margin-top: 14px; border: 1px solid #e2c3b2; border-radius: 4px; background: #fff8f2; color: #714635; }
 .issues-panel > summary { display: flex; align-items: center; min-height: 39px; padding: 0 12px; gap: 8px; cursor: pointer; font-size: 11px; font-weight: 600; list-style: none; }

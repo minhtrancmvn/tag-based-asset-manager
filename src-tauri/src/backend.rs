@@ -5,7 +5,10 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::SystemTime,
 };
 use tauri::{ipc::Channel, State};
@@ -212,6 +215,7 @@ struct Inner {
     settings_extra: BTreeMap<String, serde_json::Value>,
     startup_issue: Option<AppError>,
     scan_snapshots: HashMap<String, EditSnapshot>,
+    scan_cancellations: HashMap<(String, String), Arc<AtomicBool>>,
 }
 
 struct EditSnapshot {
@@ -311,6 +315,7 @@ impl BackendState {
                 settings_extra,
                 startup_issue,
                 scan_snapshots: HashMap::new(),
+                scan_cancellations: HashMap::new(),
             })),
         })
     }
@@ -1178,53 +1183,117 @@ pub async fn scan_library(
     scan_id: String,
     on_progress: Channel<ScanProgress>,
     state: State<'_, BackendState>,
-) -> CommandResult<ScanResult> {
-    let root_text = state
-        .snapshot()?
-        .libraries
-        .into_iter()
-        .find(|l| l.id == library_id)
-        .map(|l| l.root_path)
-        .ok_or_else(|| AppError::from("Unknown library ID"))?;
+) -> CommandResult<Option<ScanResult>> {
+    let (root_text, cancellation) = {
+        let mut inner = state
+            .inner
+            .lock()
+            .map_err(|_| AppError::from("Library state unavailable"))?;
+        if let Some(issue) = &inner.startup_issue {
+            return Err(issue.clone());
+        }
+        let root = inner
+            .libraries
+            .iter()
+            .find(|library| library.id == library_id)
+            .map(|library| library.root_path.clone())
+            .ok_or_else(|| AppError::from("Unknown library ID"))?;
+        let cancellation = Arc::new(AtomicBool::new(false));
+        inner
+            .scan_cancellations
+            .insert((library_id.clone(), scan_id.clone()), cancellation.clone());
+        (root, cancellation)
+    };
     let state = state.inner.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = PathBuf::from(root_text);
-        let canonical = validate_root(&root).map_err(|error| AppError::scan(&root, error))?;
-        if canonical != root {
-            return Err(AppError::scan(&root, "Approved library root path changed"));
-        }
-        let progress_channel = on_progress.clone();
-        let result = scan_tree(&canonical, &library_id, &scan_id, move |progress| {
-            let _ = progress_channel.send(progress);
-        })
-        .map_err(|error| AppError::scan(&root, error))?;
-        let mut inner = state
-            .lock()
-            .map_err(|_| AppError::from("Library state unavailable"))?;
-        let previous_libraries = inner.libraries.clone();
-        let previous_active = inner.active_library_id.clone();
-        if let Some(library) = inner
-            .libraries
-            .iter_mut()
-            .find(|l| l.id == library_id && l.root_path == root.to_string_lossy())
-        {
-            library.asset_count = result.assets.len();
-            library.last_scan_at = Some(result.scanned_at.clone());
-            if let Err(error) = persist(&inner) {
-                inner.libraries = previous_libraries;
-                inner.active_library_id = previous_active;
-                return Err(AppError {
-                    message: "Could not save library settings".into(),
-                    path: Some(inner.settings_path.to_string_lossy().into_owned()),
-                    details: Some(error),
-                });
+        let outcome = (|| {
+            let canonical = validate_root(&root).map_err(|error| AppError::scan(&root, error))?;
+            if canonical != root {
+                return Err(AppError::scan(&root, "Approved library root path changed"));
             }
-            record_edit_snapshot(&mut inner, &root, &result);
+            let progress_channel = on_progress.clone();
+            let result = scan_tree_cancellable(
+                &canonical,
+                &library_id,
+                &scan_id,
+                move |progress| {
+                    let _ = progress_channel.send(progress);
+                },
+                || cancellation.load(Ordering::Relaxed),
+            );
+            let result = match result {
+                Ok(result) => result,
+                Err(error) if error == "SCAN_CANCELLED" => return Ok(None),
+                Err(error) => return Err(AppError::scan(&root, error)),
+            };
+            let mut inner = state
+                .lock()
+                .map_err(|_| AppError::from("Library state unavailable"))?;
+            if cancellation.load(Ordering::Relaxed) {
+                return Ok(None);
+            }
+            let previous_libraries = inner.libraries.clone();
+            let previous_active = inner.active_library_id.clone();
+            if let Some(library) = inner
+                .libraries
+                .iter_mut()
+                .find(|l| l.id == library_id && l.root_path == root.to_string_lossy())
+            {
+                library.asset_count = result.assets.len();
+                library.last_scan_at = Some(result.scanned_at.clone());
+                if let Err(error) = persist(&inner) {
+                    inner.libraries = previous_libraries;
+                    inner.active_library_id = previous_active;
+                    return Err(AppError {
+                        message: "Could not save library settings".into(),
+                        path: Some(inner.settings_path.to_string_lossy().into_owned()),
+                        details: Some(error),
+                    });
+                }
+                record_edit_snapshot(&mut inner, &root, &result);
+            }
+            Ok(Some(result))
+        })();
+        if let Ok(mut inner) = state.lock() {
+            if inner
+                .scan_cancellations
+                .get(&(library_id.clone(), scan_id.clone()))
+                .is_some_and(|current| Arc::ptr_eq(current, &cancellation))
+            {
+                inner
+                    .scan_cancellations
+                    .remove(&(library_id.clone(), scan_id.clone()));
+            }
         }
-        Ok(result)
+        outcome
     })
     .await
     .map_err(|e| AppError::from(format!("Scanner task failed: {e}")))?
+}
+
+#[tauri::command]
+pub fn cancel_scan(
+    library_id: String,
+    scan_id: String,
+    state: State<'_, BackendState>,
+) -> CommandResult<bool> {
+    let inner = state
+        .inner
+        .lock()
+        .map_err(|_| AppError::from("Library state unavailable"))?;
+    let approved = inner
+        .libraries
+        .iter()
+        .any(|library| library.id == library_id);
+    if !approved {
+        return Err(AppError::from("Unknown library ID"));
+    }
+    let Some(cancellation) = inner.scan_cancellations.get(&(library_id, scan_id)) else {
+        return Ok(false);
+    };
+    cancellation.store(true, Ordering::Relaxed);
+    Ok(true)
 }
 
 fn validate_inside_root(root: &Path, path: &Path) -> Result<(), String> {
@@ -1303,7 +1372,17 @@ fn scan_tree(
     root: &Path,
     library_id: &str,
     scan_id: &str,
+    progress: impl FnMut(ScanProgress),
+) -> Result<ScanResult, String> {
+    scan_tree_cancellable(root, library_id, scan_id, progress, || false)
+}
+
+fn scan_tree_cancellable(
+    root: &Path,
+    library_id: &str,
+    scan_id: &str,
     mut progress: impl FnMut(ScanProgress),
+    mut is_cancelled: impl FnMut() -> bool,
 ) -> Result<ScanResult, String> {
     let root_meta =
         fs::symlink_metadata(root).map_err(|e| format!("Library root unavailable: {e}"))?;
@@ -1318,6 +1397,9 @@ fn scan_tree(
     let mut stack = vec![(root.to_path_buf(), PathBuf::from("."))];
     let mut seen = HashSet::new();
     while let Some((dir, relative_dir)) = stack.pop() {
+        if is_cancelled() {
+            return Err("SCAN_CANCELLED".into());
+        }
         let metadata = match fs::symlink_metadata(&dir) {
             Ok(metadata) => metadata,
             Err(error) => {
@@ -1359,6 +1441,9 @@ fn scan_tree(
         };
         let mut children = Vec::new();
         for entry in entries {
+            if is_cancelled() {
+                return Err("SCAN_CANCELLED".into());
+            }
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(error) => {
@@ -1477,6 +1562,9 @@ fn scan_tree(
         }
         children.reverse();
         stack.extend(children);
+    }
+    if is_cancelled() {
+        return Err("SCAN_CANCELLED".into());
     }
     assets.push(Asset {
         id: "path:.".into(),
@@ -2739,6 +2827,25 @@ mod tests {
             .details
             .unwrap()
             .contains("Library root unavailable"));
+    }
+
+    #[test]
+    fn cancellable_scan_stops_traversal_without_final_result() {
+        let dir = tempdir().unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        for index in 0..300 {
+            fs::File::create(root.join(format!("asset-{index:03}.bin"))).unwrap();
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let signal = cancelled.clone();
+        let result = scan_tree_cancellable(
+            &root,
+            "library",
+            "cancel-me",
+            move |_| signal.store(true, Ordering::Relaxed),
+            || cancelled.load(Ordering::Relaxed),
+        );
+        assert_eq!(result.unwrap_err(), "SCAN_CANCELLED");
     }
 
     #[test]

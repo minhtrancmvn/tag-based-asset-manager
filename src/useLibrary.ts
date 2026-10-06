@@ -21,6 +21,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [validation, setValidation] = useState<ValidationReport | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const scanBusy = useRef(false);
+  const activeScan = useRef<{ libraryId: string; scanId: string; cancelled: boolean } | null>(null);
   const mounted = useRef(false);
   const stateRef = useRef(emptyState);
   const scanGeneration = useRef(0);
@@ -29,7 +30,9 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const scan = useCallback(async (libraryId: string) => {
     const generation = ++scanGeneration.current;
     const scanId = crypto.randomUUID();
-    const current = () => mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId;
+    const request = { libraryId, scanId, cancelled: false };
+    activeScan.current = request;
+    const current = () => mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId && activeScan.current === request;
     setAssets([]);
     setIssues([]);
     setProgress(0);
@@ -41,7 +44,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       const result = await client.scan(libraryId, scanId, (update) => {
         if (current() && update.libraryId === libraryId && update.scanId === scanId) setProgress(update.visited);
       });
-      if (!current()) return;
+      if (!current() || request.cancelled || result === null) return;
       if (result.libraryId !== libraryId || result.scanId !== scanId) throw new Error("Scan response did not match the requested library.");
       setAssets(result.assets);
       setIssues(result.issues);
@@ -56,11 +59,34 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     } catch (failure) {
       if (current()) setError(toAppError(failure));
     } finally {
-      if (current()) { setScanning(false); scanBusy.current = false; }
+      if (current()) {
+        activeScan.current = null;
+        setScanning(false);
+        scanBusy.current = false;
+      }
+    }
+  }, [client]);
+
+  const cancelScan = useCallback(async () => {
+    const scan = activeScan.current;
+    if (!client.isDesktop || !scan || scan.cancelled) return false;
+    scan.cancelled = true;
+    ++scanGeneration.current;
+    setAssets([]);
+    setIssues([]);
+    setScanning(false);
+    scanBusy.current = false;
+    activeScan.current = null;
+    try {
+      return await client.cancelScan(scan.libraryId, scan.scanId);
+    } catch (failure) {
+      if (mounted.current) setError(toAppError(failure));
+      return false;
     }
   }, [client]);
 
   const applyState = useCallback((next: LibraryState) => {
+    activeScan.current = null;
     ++scanGeneration.current;
     stateRef.current = next;
     setState(next);
@@ -248,7 +274,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
 
   return {
     state, library: state.libraries.find((library) => library.id === state.activeLibraryId) ?? null,
-    assets, issues, loading, scanning, progress, error,
+    assets, issues, loading, scanning, progress, error, cancelScan,
     chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId,
     bulkEditTags, bulkEditing, savedSearches: (state.savedSearches ?? []).filter((search) => search.libraryId === state.activeLibraryId),
     savingSearch, saveSearch, deleteSearch, performAction, actionBusy,

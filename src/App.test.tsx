@@ -31,6 +31,7 @@ const actions = {
   activateLibrary: vi.fn<(_: string) => Promise<void>>(),
   removeLibrary: vi.fn<(_: string) => Promise<void>>(),
   rescan: vi.fn<() => Promise<void>>(),
+  cancelScan: vi.fn<() => Promise<boolean>>(),
   dismissError: vi.fn<() => void>(),
   performAction: vi.fn<(_: Asset, __: import("./types").AssetAction) => Promise<boolean>>(),
   validateMetadata: vi.fn<() => Promise<boolean>>(),
@@ -71,6 +72,7 @@ function setLibraryResult(overrides: Partial<{
     activateLibrary: actions.activateLibrary,
     removeLibrary: actions.removeLibrary,
     rescan: actions.rescan,
+    cancelScan: actions.cancelScan,
     dismissError: actions.dismissError,
     editTags: actions.editTags,
     bulkEditTags: actions.bulkEditTags,
@@ -129,6 +131,7 @@ describe("scanned library UI", () => {
     expect(within(screen.getByRole("table")).queryByText("Gear.stl", { selector: ".name-content span" })).toBeNull();
     fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
     expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).toContain("Models");
+    expect(screen.getByRole("button", { name: "Go up one folder" })).toBeTruthy();
     expect(assetRows()).toHaveLength(2);
     expect(within(screen.getByRole("table")).getByText("Gear.stl", { selector: ".name-content span" })).toBeTruthy();
     expect(within(screen.getByRole("table")).getByText("Parts", { selector: ".folder-name" })).toBeTruthy();
@@ -141,6 +144,20 @@ describe("scanned library UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Go up one folder" }));
     expect(assetRows()).toHaveLength(2);
     expect(within(screen.getByRole("table")).queryByText("Gear.stl", { selector: ".name-content span" })).toBeNull();
+  });
+  it("keeps folder Up navigation in the catalog toolbar, outside the sidebar", () => {
+    const folder: Asset = { ...assets[1], id: "folder-codes", name: "Codes", relativePath: "Codes" };
+    const nested: Asset = { ...assets[0], id: "nested", name: "Example.ts", relativePath: "Codes/Example.ts" };
+    setLibraryResult({ assets: [folder, nested] });
+    render(<App />);
+    const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
+    expect(within(sidebar).queryByRole("button", { name: "Go up one folder" })).toBeNull();
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Codes", { selector: ".folder-name" }));
+    const catalog = screen.getByRole("region", { name: "Assets catalog" });
+    expect(within(catalog).getByRole("button", { name: "Go up one folder" })).toBeTruthy();
+    fireEvent.click(within(catalog).getByRole("button", { name: "Go up one folder" }));
+    expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).not.toContain("Codes");
+    expect(within(sidebar).queryByRole("button", { name: "Go up one folder" })).toBeNull();
   });
   it("returns to library root when a rescan clears all folders", () => {
     const root: Asset = { id: "root", name: "Workshop", relativePath: ".", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "untagged" };
@@ -276,6 +293,10 @@ describe("scanned library UI", () => {
     expect(within(screen.getByRole("region", { name: "Assets catalog" })).getByRole("status")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Rescan$/ })).toHaveLength(1);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(true);
+    const stop = screen.getByRole<HTMLButtonElement>("button", { name: "Stop scanning" });
+    expect(stop.disabled).toBe(false);
+    fireEvent.click(stop);
+    expect(actions.cancelScan).toHaveBeenCalledOnce();
     setLibraryResult();
     rerender(<App />);
     expect(screen.queryByRole("status")).toBeNull();
