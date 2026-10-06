@@ -1,0 +1,1 @@
+Synthetic fixture with Unicode path: 猫と狐 · mèo và cáo.
