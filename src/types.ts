@@ -85,6 +85,19 @@ export interface ExportResult {
   assetCount: number;
 }
 
+export interface TrashResult {
+  completedIds: string[];
+  error: AppError | null;
+}
+
+export interface PreviewResult {
+  kind: "text" | "image" | "unsupported";
+  content: string | null;
+  mimeType: string | null;
+  truncated: boolean;
+  message: string | null;
+}
+
 export interface ScanProgress {
   libraryId: string;
   scanId: string;
@@ -102,4 +115,3 @@ export interface ScanResult {
 export type ViewKey = "all" | "untagged" | "attention";
 export type SortKey = "name" | "tags" | "type" | "path" | "modified" | "size" | "status";
 export type SortDirection = "asc" | "desc";
-export type TagGroup = "Category" | "Style" | "Theme" | "Status" | "Other";

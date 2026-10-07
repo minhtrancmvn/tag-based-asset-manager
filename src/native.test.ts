@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScanProgress } from "./types";
 
@@ -14,6 +15,19 @@ import { nativeClient, toAppError } from "./native";
 beforeEach(() => { vi.clearAllMocks(); mocks.channels.length = 0; });
 
 describe("native DTO bridge", () => {
+  it("allows bounded raster data previews without allowing data scripts or documents", () => {
+    const config = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+    const directives = new Map<string, string[]>(config.app.security.csp.split(";").map((directive: string) => {
+      const [name, ...sources] = directive.trim().split(/\s+/);
+      return [name, sources];
+    }));
+    expect(directives.get("img-src")).toContain("data:");
+    expect(directives.get("default-src")).toEqual(["'self'"]);
+    expect(directives.get("script-src") ?? directives.get("default-src")).not.toContain("data:");
+    expect(directives.get("script-src") ?? directives.get("default-src")).not.toContain("'unsafe-inline'");
+    expect(directives.get("frame-src") ?? directives.get("default-src")).not.toContain("data:");
+    expect(directives.get("connect-src")).not.toContain("*");
+  });
   it("uses only library IDs for native operations", async () => {
     await nativeClient.load();
     await nativeClient.choose();
@@ -29,6 +43,19 @@ describe("native DTO bridge", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("scan_library", { libraryId: "root1", scanId: "scan1", onProgress: mocks.channels[0] });
     mocks.channels[0].onmessage?.({ libraryId: "root1", scanId: "scan1", visited: 128 });
     expect(progress).toHaveBeenCalledWith({ libraryId: "root1", scanId: "scan1", visited: 128 });
+  });
+  it("requests cancellation by library and scan ID only", async () => {
+    await nativeClient.cancelScan("root1", "scan1");
+    expect(mocks.invoke).toHaveBeenCalledWith("cancel_scan", { libraryId: "root1", scanId: "scan1" });
+  });
+  it("sends approved IDs for trash and preview without arbitrary paths", async () => {
+    const targets = [{ assetId: "path:photo.png", expectedRevision: "rev" }];
+    await nativeClient.deleteAssets("root1", targets);
+    await nativeClient.previewAsset("root1", "path:photo.png");
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["delete_assets", { libraryId: "root1", targets }],
+      ["preview_asset", { libraryId: "root1", assetId: "path:photo.png" }],
+    ]);
   });
   it("sends only ID and revision for sidecar tag edit", async () => {
     await nativeClient.editTags("root1", "path:Figures/Dragon.3mf", "revision1", ["style:flexi"], ["status:printed"]);

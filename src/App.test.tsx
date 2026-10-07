@@ -31,12 +31,15 @@ const actions = {
   activateLibrary: vi.fn<(_: string) => Promise<void>>(),
   removeLibrary: vi.fn<(_: string) => Promise<void>>(),
   rescan: vi.fn<() => Promise<void>>(),
+  cancelScan: vi.fn<() => Promise<boolean>>(),
   dismissError: vi.fn<() => void>(),
   performAction: vi.fn<(_: Asset, __: import("./types").AssetAction) => Promise<boolean>>(),
   validateMetadata: vi.fn<() => Promise<boolean>>(),
   exportMetadata: vi.fn<() => Promise<boolean>>(),
   getReconnectTargets: vi.fn<(_: Asset) => Promise<Asset[] | null>>(),
   reconnectAsset: vi.fn<(_: Asset, __: Asset) => Promise<boolean>>(),
+  deleteAssets: vi.fn<(_: Asset[]) => Promise<boolean>>(),
+  previewAsset: vi.fn<(_: Asset) => Promise<import("./types").PreviewResult | null>>(),
 };
 
 function setLibraryResult(overrides: Partial<{
@@ -46,6 +49,7 @@ function setLibraryResult(overrides: Partial<{
   issues: ScanIssue[];
   loading: boolean;
   scanning: boolean;
+  scanStopped: boolean;
   progress: number;
   error: { message: string; path: string | null; details: string | null } | null;
   isDesktop: boolean;
@@ -65,12 +69,14 @@ function setLibraryResult(overrides: Partial<{
     issues: [],
     loading: false,
     scanning: false,
+    scanStopped: false,
     progress: 0,
     error: null,
     chooseLibrary: actions.chooseLibrary,
     activateLibrary: actions.activateLibrary,
     removeLibrary: actions.removeLibrary,
     rescan: actions.rescan,
+    cancelScan: actions.cancelScan,
     dismissError: actions.dismissError,
     editTags: actions.editTags,
     bulkEditTags: actions.bulkEditTags,
@@ -87,6 +93,9 @@ function setLibraryResult(overrides: Partial<{
     exportResult: null,
     getReconnectTargets: actions.getReconnectTargets,
     reconnectAsset: actions.reconnectAsset,
+    deleteAssets: actions.deleteAssets,
+    previewAsset: actions.previewAsset,
+    deleting: false,
     recoveryBusy: false,
     editingAssetId: null,
     isDesktop: true,
@@ -100,6 +109,7 @@ function assetRows() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  actions.previewAsset.mockResolvedValue({ kind: "unsupported", content: null, mimeType: null, truncated: false, message: "No preview available." });
   setLibraryResult();
 });
 
@@ -129,6 +139,7 @@ describe("scanned library UI", () => {
     expect(within(screen.getByRole("table")).queryByText("Gear.stl", { selector: ".name-content span" })).toBeNull();
     fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
     expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).toContain("Models");
+    expect(screen.getByRole("button", { name: "Go up one folder" })).toBeTruthy();
     expect(assetRows()).toHaveLength(2);
     expect(within(screen.getByRole("table")).getByText("Gear.stl", { selector: ".name-content span" })).toBeTruthy();
     expect(within(screen.getByRole("table")).getByText("Parts", { selector: ".folder-name" })).toBeTruthy();
@@ -141,6 +152,20 @@ describe("scanned library UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Go up one folder" }));
     expect(assetRows()).toHaveLength(2);
     expect(within(screen.getByRole("table")).queryByText("Gear.stl", { selector: ".name-content span" })).toBeNull();
+  });
+  it("keeps folder Up navigation in the catalog toolbar, outside the sidebar", () => {
+    const folder: Asset = { ...assets[1], id: "folder-codes", name: "Codes", relativePath: "Codes" };
+    const nested: Asset = { ...assets[0], id: "nested", name: "Example.ts", relativePath: "Codes/Example.ts" };
+    setLibraryResult({ assets: [folder, nested] });
+    render(<App />);
+    const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
+    expect(within(sidebar).queryByRole("button", { name: "Go up one folder" })).toBeNull();
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Codes", { selector: ".folder-name" }));
+    const catalog = screen.getByRole("region", { name: "Assets catalog" });
+    expect(within(catalog).getByRole("button", { name: "Go up one folder" })).toBeTruthy();
+    fireEvent.click(within(catalog).getByRole("button", { name: "Go up one folder" }));
+    expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).not.toContain("Codes");
+    expect(within(sidebar).queryByRole("button", { name: "Go up one folder" })).toBeNull();
   });
   it("returns to library root when a rescan clears all folders", () => {
     const root: Asset = { id: "root", name: "Workshop", relativePath: ".", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "untagged" };
@@ -276,11 +301,25 @@ describe("scanned library UI", () => {
     expect(within(screen.getByRole("region", { name: "Assets catalog" })).getByRole("status")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Rescan$/ })).toHaveLength(1);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(true);
+    const stop = screen.getByRole<HTMLButtonElement>("button", { name: "Stop scanning" });
+    expect(stop.disabled).toBe(false);
+    fireEvent.click(stop);
+    expect(actions.cancelScan).toHaveBeenCalledOnce();
     setLibraryResult();
     rerender(<App />);
     expect(screen.queryByRole("status")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^Rescan$/ }));
     expect(actions.rescan).toHaveBeenCalledOnce();
+  });
+
+  it("unlocks library controls after Stop without describing an incomplete scan as empty", () => {
+    setLibraryResult({ assets: [], scanStopped: true });
+    render(<App />);
+    expect(screen.getByText("Scan stopped")).toBeTruthy();
+    expect(screen.queryByText(/This folder is empty/)).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose library folder" }).disabled).toBe(false);
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" }).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Stop scanning" })).toBeNull();
   });
 
   it("retains active library context when sidebar is collapsed", () => {
@@ -421,6 +460,42 @@ describe("scanned library UI", () => {
     expect(assetRows()[0].getAttribute("aria-selected")).toBe("true");
   });
 
+  it("derives sidebar groups from tag prefixes while keeping exact filters", () => {
+    const tagged: Asset = { ...assets[0], tags: ["oole:identity", "oole:identity:brand", "material:pla", "favorite", "other:custom"], status: "ready" };
+    const different: Asset = { ...assets[1], tags: ["oole:identity:brand", "material:petg"], status: "ready" };
+    setLibraryResult({ assets: [tagged, different] });
+    render(<App />);
+    const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
+    expect([...sidebar.querySelectorAll(".group-label")].map((label) => label.textContent)).toEqual(["favorite", "material", "oole", "other"]);
+    expect(within(sidebar).queryByText("Other")).toBeNull();
+    expect(within(sidebar).getByRole("button", { name: "favorite1" })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: "pla1" })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: "petg1" })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: "identity:brand2" })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: "custom1" })).toBeTruthy();
+    const filter = within(sidebar).getByRole("button", { name: "identity1" });
+    expect(filter.title).toBe("Filter by oole:identity");
+    fireEvent.click(filter);
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe("oole:identity");
+    expect(assetRows()).toHaveLength(1);
+    expect(assetRows()[0].getAttribute("data-asset-id")).toBe(tagged.id);
+  });
+  it("updates prefix groups for the current folder and live tag changes", () => {
+    const folder: Asset = { ...assets[1], tags: ["category:model"] };
+    const nested: Asset = { ...assets[0], relativePath: "Models/Gear.stl", tags: ["material:pla"] };
+    setLibraryResult({ assets: [folder, nested] });
+    const { rerender } = render(<App />);
+    const labels = () => [...screen.getByRole("complementary", { name: "Library navigation" }).querySelectorAll(".group-label")].map((label) => label.textContent);
+    expect(labels()).toEqual(["category"]);
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
+    expect(labels()).toEqual(["material"]);
+    setLibraryResult({ assets: [folder, { ...nested, tags: ["author:someone"] }] });
+    rerender(<App />);
+    expect(labels()).toEqual(["author"]);
+    setLibraryResult({ assets: [folder, { ...nested, tags: [] }] });
+    rerender(<App />);
+    expect(labels()).toEqual([]);
+  });
   it("keeps untagged view and sidebar counts based on live tags", () => {
     const tagged: Asset = { ...assets[0], tags: ["category:gear"], metadataRevision: "rev-1" };
     setLibraryResult({ assets: [tagged, assets[1]] });
@@ -435,7 +510,7 @@ describe("scanned library UI", () => {
     const tagged: Asset = { ...assets[0], tags: ["category:gear"], metadataRevision: "rev-1" };
     setLibraryResult({ assets: [tagged, assets[1]] });
     render(<App />);
-    const row = assetRows()[0];
+    const row = screen.getByRole("table").querySelector<HTMLTableRowElement>('tr[data-asset-id="asset-1"]')!;
     fireEvent.click(within(row).getByRole("button", { name: "Remove tag category:gear" }));
     expect(actions.editTags).toHaveBeenCalledWith(tagged, [], ["category:gear"]);
     expect(row.getAttribute("aria-selected")).toBe("false");
@@ -567,7 +642,7 @@ describe("scanned library UI", () => {
     const existing = { ...assets[0], status: "ready" as const };
     setLibraryResult({ assets: [existing, assets[1]] });
     render(<App />);
-    fireEvent.contextMenu(assetRows()[1]);
+    fireEvent.contextMenu(screen.getByRole("table").querySelector('tr[data-asset-id="asset-2"]')!);
     const menu = screen.getByRole("menu", { name: "Actions for Models" });
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Open" }));
     expect(actions.performAction).toHaveBeenCalledWith(assets[1], "open");
@@ -589,6 +664,38 @@ describe("scanned library UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review reconnect" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm reconnect" }));
     expect(actions.reconnectAsset).toHaveBeenCalledWith(missing, assets[0]);
+  });
+
+  it("deletes a confirmed row through the destructive dialog and not before", async () => {
+    const confirm = actions.deleteAssets.mockResolvedValue(true);
+    setLibraryResult({ assets: [{ ...assets[0], status: "ready", tags: ["favorite"] }] });
+    render(<App />);
+    fireEvent.contextMenu(assetRows()[0]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: /Delete Gear.stl/ });
+    expect(confirm).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete item" }));
+    expect(confirm).toHaveBeenCalledWith([expect.objectContaining({ id: "asset-1" })]);
+  });
+
+  it("offers bulk delete for the exact selection and keeps the folder row protected", () => {
+    const root: Asset = { id: "path:.", name: "Workshop", relativePath: ".", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "ready", metadataRevision: "rev-root" };
+    setLibraryResult({ assets: [root, { ...assets[0], status: "ready" }] });
+    render(<App />);
+    expect(assetRows()).toHaveLength(1);
+    fireEvent.click(assetRows()[0]);
+    expect(screen.queryByRole("button", { name: "Delete selected" })).toBeNull();
+    expect(within(screen.getByRole("table")).queryByText("Workshop")).toBeNull();
+    cleanup();
+    setLibraryResult({ assets: [{ ...assets[0], status: "ready" }, { ...assets[1], status: "ready" }] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(assetRows()[1], { metaKey: true });
+    const bulk = screen.getByRole("button", { name: "Delete selected" });
+    expect((bulk as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(bulk);
+    expect(screen.getByRole("dialog", { name: /Delete 2 items/ })).toBeTruthy();
   });
 
   it("routes full and relative path copy through native action enums", () => {
