@@ -1,5 +1,5 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppError, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState, ScanProgress, ScanResult, SearchFilters, ValidationReport } from "./types";
+import type { AppError, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState, PreviewResult, ScanProgress, ScanResult, SearchFilters, TrashResult, ValidationReport } from "./types";
 
 export interface LibraryClient {
   isDesktop: boolean;
@@ -9,6 +9,8 @@ export interface LibraryClient {
   remove: (libraryId: string) => Promise<LibraryState>;
   scan: (libraryId: string, scanId: string, onProgress: (progress: ScanProgress) => void) => Promise<ScanResult | null>;
   cancelScan: (libraryId: string, scanId: string) => Promise<boolean>;
+  deleteAssets: (libraryId: string, targets: BulkTagTarget[]) => Promise<TrashResult>;
+  previewAsset: (libraryId: string, assetId: string) => Promise<PreviewResult>;
   editTags: (libraryId: string, assetId: string, expectedRevision: string, addTags: string[], removeTags: string[]) => Promise<Asset>;
   bulkEditTags: (libraryId: string, targets: BulkTagTarget[], addTags: string[], removeTags: string[]) => Promise<BulkTagResult>;
   saveSearch: (libraryId: string, name: string, filters: SearchFilters, searchId: string | null) => Promise<LibraryState>;
@@ -52,4 +54,6 @@ export const nativeClient: LibraryClient = {
     return invoke<ScanResult | null>("scan_library", { libraryId, scanId, onProgress: channel });
   },
   cancelScan: (libraryId, scanId) => invoke<boolean>("cancel_scan", { libraryId, scanId }),
+  deleteAssets: (libraryId, targets) => invoke<TrashResult>("delete_assets", { libraryId, targets }),
+  previewAsset: (libraryId, assetId) => invoke<PreviewResult>("preview_asset", { libraryId, assetId }),
 };

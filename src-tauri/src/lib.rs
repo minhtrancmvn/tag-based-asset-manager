@@ -21,6 +21,8 @@ pub fn run() {
             backend::remove_library,
             backend::scan_library,
             backend::cancel_scan,
+            backend::delete_assets,
+            backend::preview_asset,
             backend::edit_tags,
             backend::bulk_edit_tags,
             backend::upsert_saved_search,

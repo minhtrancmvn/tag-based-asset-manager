@@ -1,3 +1,27 @@
+# Optimized release WKWebView observations
+
+## Symptoms and reproduction (immutable)
+Expected: Selecting synthetic PNG shows bounded raster preview; catalog remains usable.
+Actual: Optimized custom-protocol app starts with eight rows and correct grouping, but observer times out after PNG selection; prior app-only screenshot is blank white.
+Environment: Darwin 27 arm64; Node 24.19.0; Tauri optimized release with copied production frontend and unique app-data identifier. Production image/script CSP retained; loopback observer connection only addition. Synthetic library only, user libraries off-limits.
+Steps: Start isolated release; wait for eight-row snapshot; group/filter/navigate; select Readme.txt, Large.txt, Invalid.txt and Unsafe.html successfully; select Pixel.png; observer fails to respond within 30 seconds. Three fresh launches repeat same PNG timeout. Three separate text-only launches pass.
+Knowledge base: Existing large-catalog rendering entry found; not applicable to eight-row PNG-specific failure. No prior matching preview/release entry.
+Evidence: /private/var/folders/d3/47mnxs2x33q95gbms0193hxr0000gn/T/tag-release-acceptance-_tv_sbmp/selection-reproduction.json and matrix-results.json. No WebKit crash reports found. Runtime logs show background suspension, not confirmed process crash.
+
+## Ranked hypotheses
+1. Image CSP mismatch triggers failure during raster render. HIGH: backend returns data:image/png;base64 URL; production img-src excludes data:. Debug live devUrl may use different CSP. Test native preview without rendering, controlled data-image insertion, identical release with only raster data scheme allowed.
+2. Native preview IPC or image bytes corrupt WebContent. MEDIUM: text IPC works; failure starts at image. Test native preview invocation without img; decode same synthetic PNG separately.
+3. Scratch observer or host lifecycle loses page/telemetry. MEDIUM: receiver previously had bug, stale action on boot gave null-row error; timeout alone does not prove blank/crash. Test heartbeat/mutation/page lifecycle evidence and direct native observation.
+4. React image error loop or inspector render error. LOW: image onError sets fixed error state; small text/folder inspectors work. Test image render with native load isolated and existing component tests.
+
+## Status
+Confirmed independent image-CSP defect: actual native PNG selection under original production img-src yields blocked data URL and visible decode error with intact catalog 3/3; backend PNG payload valid. img-src-only `data:` addition and config regression fix this image rendering issue. General blank/timeout not attributed to CSP: compatible image policy still times out during occluded/background full sequence, sometimes before PNG. Scratch-only disabled background throttling plus foreground activation passed complete sequence 3/3 with zero runtime warning/error/CSP events. Host suspension logs support lifecycle explanation; this does not prove default-background behavior fixed. Production background-throttling policy unchanged.
+
+## Final evidence (2026-10-07)
+190 frontend tests pass; production build, 79 Rust tests/one ignored, fmt/all-target Clippy pass. Optimized bundled WKWebView with scratch disabled throttling verified prefix/exact filtering/folder navigation, literal text, 65,536-byte truncation, invalid UTF-8 rejection, unsupported HTML, decoded PNG, metadata validation and Rescan recovery in three fresh sessions. App-window screenshot inspected. Original image CSP RED/compatible-policy GREEN isolated separately with default throttling; no claim that scratch window-policy control is a production fix. Evidence `matrix-results-disabled-throttling.json`, `diagnostic-blocked-ui-{1,2,3}.json`, `diagnostic-data-ui-alone.json` and `release-awake-window.png` in release acceptance directory.
+
+---
+
 # Large-library scan observations
 
 ## Bug signature

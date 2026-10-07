@@ -1,4 +1,4 @@
-import type { Asset, KindFilter, SortDirection, SortKey, TagGroup, TagMatchMode, ViewKey } from "./types";
+import type { Asset, KindFilter, SortDirection, SortKey, TagMatchMode, ViewKey } from "./types";
 
 export interface CatalogQuery {
   requiredTags: string[];
@@ -6,13 +6,8 @@ export interface CatalogQuery {
   text: string[];
 }
 
-export function tagGroup(tag: string): TagGroup {
-  const prefix = tag.split(":", 1)[0].toLowerCase();
-  if (prefix === "category") return "Category";
-  if (prefix === "style") return "Style";
-  if (prefix === "theme") return "Theme";
-  if (prefix === "status") return "Status";
-  return "Other";
+export function tagGroup(tag: string): string {
+  return tag.split(":", 1)[0].toLowerCase();
 }
 
 export function parseQuery(input: string): CatalogQuery {
@@ -61,9 +56,14 @@ export function sortAssets(assets: Asset[], key: SortKey, direction: SortDirecti
       case "status": return asset.status;
     }
   };
-  return [...assets].sort((a, b) => direction === "asc"
-    ? text(a).localeCompare(text(b), undefined, { numeric: true, sensitivity: "base" })
-    : text(b).localeCompare(text(a), undefined, { numeric: true, sensitivity: "base" }));
+  return [...assets].sort((a, b) => {
+    // Folders always lead the catalog, then files; the chosen key orders each group.
+    const folderOrder = Number(a.kind !== "folder") - Number(b.kind !== "folder");
+    if (folderOrder !== 0) return folderOrder;
+    return direction === "asc"
+      ? text(a).localeCompare(text(b), undefined, { numeric: true, sensitivity: "base" })
+      : text(b).localeCompare(text(a), undefined, { numeric: true, sensitivity: "base" });
+  });
 }
 
 export function formatSize(bytes: number | null): string {

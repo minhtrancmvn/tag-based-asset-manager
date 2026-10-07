@@ -1296,6 +1296,37 @@ pub fn cancel_scan(
     Ok(true)
 }
 
+#[tauri::command]
+pub async fn delete_assets(
+    library_id: String,
+    targets: Vec<BulkTagTarget>,
+    state: State<'_, BackendState>,
+) -> CommandResult<asset_operations::TrashResult> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        asset_operations::delete_assets_domain(&state, &library_id, &targets)
+    })
+    .await
+    .map_err(|error| AppError::from(format!("Trash task failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn preview_asset(
+    library_id: String,
+    asset_id: String,
+    state: State<'_, BackendState>,
+) -> CommandResult<asset_operations::PreviewResult> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        asset_operations::preview_asset_domain(&state, &library_id, &asset_id)
+    })
+    .await
+    .map_err(|error| AppError::from(format!("Asset preview task failed: {error}")))?
+}
+
+#[path = "asset_operations.rs"]
+mod asset_operations;
+
 fn validate_inside_root(root: &Path, path: &Path) -> Result<(), String> {
     let relative = path
         .strip_prefix(root)
@@ -1588,8 +1619,14 @@ fn scan_tree_cancellable(
         metadata_state: "none".into(),
         metadata_revision: manifest::revision(&(None::<String>, ".", "none")),
     });
-    merge_manifest_metadata(root, &mut assets, &mut issues);
+    merge_manifest_metadata_cancellable(root, &mut assets, &mut issues, &mut is_cancelled)?;
+    if is_cancelled() {
+        return Err("SCAN_CANCELLED".into());
+    }
     assets.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    if is_cancelled() {
+        return Err("SCAN_CANCELLED".into());
+    }
     let scanned_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     progress(ScanProgress {
         library_id: library_id.into(),
@@ -1605,7 +1642,18 @@ fn scan_tree_cancellable(
     })
 }
 
+#[cfg(test)]
 fn merge_manifest_metadata(root: &Path, assets: &mut Vec<Asset>, issues: &mut Vec<ScanIssue>) {
+    merge_manifest_metadata_cancellable(root, assets, issues, &mut || false)
+        .expect("uncancelled metadata merge");
+}
+
+fn merge_manifest_metadata_cancellable(
+    root: &Path,
+    assets: &mut Vec<Asset>,
+    issues: &mut Vec<ScanIssue>,
+    is_cancelled: &mut impl FnMut() -> bool,
+) -> Result<(), String> {
     use manifest::ReadManifest;
     let mut manifests: HashMap<String, ReadManifest> = HashMap::new();
     let dirs: HashSet<String> = assets
@@ -1614,6 +1662,9 @@ fn merge_manifest_metadata(root: &Path, assets: &mut Vec<Asset>, issues: &mut Ve
         .map(|asset| asset.relative_path.clone())
         .collect();
     for relative in dirs {
+        if is_cancelled() {
+            return Err("SCAN_CANCELLED".into());
+        }
         let absolute = if relative == "." {
             root.to_path_buf()
         } else {
@@ -1651,6 +1702,9 @@ fn merge_manifest_metadata(root: &Path, assets: &mut Vec<Asset>, issues: &mut Ve
     for (directory, state) in &manifests {
         if let ReadManifest::Valid { manifest, .. } = state {
             for (key, entry) in &manifest.items {
+                if is_cancelled() {
+                    return Err("SCAN_CANCELLED".into());
+                }
                 let canonical_id = Uuid::parse_str(&entry.id)
                     .expect("parsed manifest has valid UUIDs")
                     .to_string();
@@ -1677,6 +1731,9 @@ fn merge_manifest_metadata(root: &Path, assets: &mut Vec<Asset>, issues: &mut Ve
     }
 
     for asset in assets.iter_mut() {
+        if is_cancelled() {
+            return Err("SCAN_CANCELLED".into());
+        }
         let (directory, key) = if asset.relative_path == "." {
             (".".to_string(), ".".to_string())
         } else if asset.kind == "folder" {
@@ -1828,6 +1885,9 @@ fn merge_manifest_metadata(root: &Path, assets: &mut Vec<Asset>, issues: &mut Ve
             continue;
         };
         for key in manifest.items.keys() {
+            if is_cancelled() {
+                return Err("SCAN_CANCELLED".into());
+            }
             if key == "." {
                 continue;
             }
@@ -1894,6 +1954,7 @@ fn merge_manifest_metadata(root: &Path, assets: &mut Vec<Asset>, issues: &mut Ve
             }
         }
     }
+    Ok(())
 }
 
 fn metadata_display_path(directory: &str, key: &str) -> String {
@@ -2846,6 +2907,26 @@ mod tests {
             || cancelled.load(Ordering::Relaxed),
         );
         assert_eq!(result.unwrap_err(), "SCAN_CANCELLED");
+    }
+
+    #[test]
+    fn metadata_merge_can_stop_before_reading_more_manifests() {
+        let (_dir, root, state) = tag_test_library();
+        fs::write(root.join("model.stl"), b"asset").unwrap();
+        let result = scan_tree(&root, "library", "complete", |_| {}).unwrap();
+        record_edit_snapshot(&mut state.inner.lock().unwrap(), &root, &result);
+        let mut assets = result.assets.clone();
+        let mut issues = Vec::new();
+        let stopped =
+            merge_manifest_metadata_cancellable(&root, &mut assets, &mut issues, &mut || true);
+        assert_eq!(stopped.unwrap_err(), "SCAN_CANCELLED");
+        assert!(issues.is_empty());
+        assert_eq!(
+            state.inner.lock().unwrap().scan_snapshots["library"]
+                .assets
+                .len(),
+            result.assets.len()
+        );
     }
 
     #[test]

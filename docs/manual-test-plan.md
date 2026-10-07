@@ -2,7 +2,7 @@
 
 ## MVP scope
 
-Use disposable test folders on Windows 11 and macOS (Apple Silicon and Intel). Scope: native approved scan, single/bulk tags, All/Any/NOT and kind filters, saved searches, open/reveal/copy, validation, confirmed same-folder reconnect and JSON export. Notes read-only; import and asset operations deferred. Inert model placeholders in `fixtures/sample-library/` are not printable models. Choose a copy explicitly through picker; never mutate canonical repository fixture during manual checks.
+Use disposable test folders on Windows 11 and macOS (Apple Silicon and Intel). Scope: native approved scan, single/bulk tags, All/Any/NOT and kind filters, saved searches, open/reveal/copy, validation, confirmed same-folder reconnect and JSON export. Also verify Stop cancellation, folders-first sorting, confirmed Trash / Recycle Bin and bounded Details previews. Notes read-only; import, arbitrary moves/rename and permanent delete deferred. Inert model placeholders in `fixtures/sample-library/` are not printable models. Choose a copy explicitly through picker; never mutate canonical repository fixture during manual checks.
 
 Record OS version, architecture, build, test ID, library location, expected/actual result and technical details. These cases are a plan, not execution evidence; see [progress log](progress-log.md) for checks actually run.
 
@@ -57,6 +57,7 @@ Record OS version, architecture, build, test ID, library location, expected/actu
 | M3-15 | Sidecar symlink/hardlink or unsafe asset traversal | Reads/writes rejected before following unsafe metadata path |
 | M3-16 | Scan without edits | No manifest or UUID created; no asset content read/changed |
 | M3-17 | Inspect UI during save | Single-item controls busy; registration/rescan cannot race edit; no bulk mutation |
+| M3-18 | Add `oole:identity`, `material:pla`, `oole:identity:brand` and `favorite` to copied fixture | Alphabetical groups `favorite`, `material`, `oole`; labels `favorite`, `pla`, `identity` and `identity:brand`; no default groups or Other bucket. Clicking `identity` filters exact `oole:identity`, not `oole:identity:brand`. Groups follow current folder and disappear when their last tag is removed |
 
 ## Bulk tags and saved-search acceptance
 
@@ -94,10 +95,30 @@ Record OS version, architecture, build, test ID, library location, expected/actu
 | M5-11 | Source reappears, stale revision, target gains identity or changes folder/link | Repair rejected, original preserved; no automatic matching |
 | M5-12 | Write failure or refresh failure after reconnect | Write failure original preserved; postcommit refresh failure explicitly says reconnect saved and asks rescan |
 | M5-13 | Export to native-selected new JSON path then cancel next picker | Valid metadata-only backup with assets/issues/manifest raw bytes; cancellation neutral, no new file |
-| M5-14 | Pick existing JSON/asset/sidecar or symlink destination | Backup refuses overwrite, original untouched |
+| M5-14 | Export to `overwrite-check.json` in disposable backup folder; record SHA-256; export again to exact same folder and manually enter `overwrite-check.json` instead of fresh timestamped default; also test asset/sidecar/symlink destinations | Backup refuses overwrite, original SHA-256 unchanged. Saving a new timestamped name does not exercise collision handling |
 | M5-15 | Inject publish failure/unsupported filesystem | Error with path/details, no partial backup or overwrite, temp cleanup attempted |
 | M5-16 | Validate/export/repair while scan/tag/settings busy | Mutations serialized; reports and dialogs cannot leak across switched libraries |
 | M5-17 | Build/install Windows and macOS bundles from host commands | App launches offline, assets remain in place, persisted tags readable after restart |
+
+Native debug reconnect UI was exercised on synthetic assets on 2026-10-07: eligible same-folder candidates, Cancel/Review no writes, explicit transfer preserving UUID/tags/notes/unknown fields and restart persistence passed. Reveal native action completed without error; exact Finder selection unverified. Host Accessibility unavailable: native picker/save-panel UI not automated; Clipboard/Open skipped to preserve existing host state. See [progress log](progress-log.md) for evidence and remaining manual gates.
+
+## Catalog controls, Trash and preview acceptance
+
+| ID | Action | Expected result |
+|---|---|---|
+| UI-01 | Enter nested folder; collapse sidebar; click Up in catalog toolbar | Up remains available beside table actions, navigates parent; disabled at root and while busy |
+| UI-02 | Sort all columns ascending/descending | Every folder precedes files; chosen order applies within each group |
+| SCAN-01 | Stop a large scan during traversal or sidecar loading | Partial rows discarded, visible Scan stopped state; Choose library and active selector unlock; late results/progress cannot replace new library |
+| SCAN-02 | Stop then immediately choose another folder; cancel picker; Rescan | Cancel picker preserves registration; new scan resets stopped state; no stale cancellation error from previous library |
+| TRASH-01 | Context Delete, inspector Delete or Delete selected; Cancel/Escape | Exact target list; no native Trash operation before Review and explicit final confirmation |
+| TRASH-02 | Confirm disposable file/folder selection | System Trash / Recycle Bin receives exact targets; folder contents and contained sidecars included; remaining sidecars unchanged; completed rows removed from UI |
+| TRASH-03 | Root, missing, unsafe link/reparse, modified file or overlapping folder/child selection | Rejected before first move; no permanent-delete fallback; untouched targets remain |
+| TRASH-04 | Inject later-target failure; restore completed target via OS file manager then Rescan | Completed moves reported and never rolled back silently; unprocessed targets remain; restored bytes/UUID/tags recover from preserved sidecars |
+| PREVIEW-01 | Select UTF-8 text, PNG/JPEG/GIF/WebP | Details shows bounded text/image; text limit 64 KiB, image limit 8 MiB; no writes |
+| PREVIEW-02 | Select another row/library before preview returns | Old content never shown under new selection; errors explicit; missing/folder/unsupported types not read as executable content |
+| PREVIEW-03 | Large image, invalid UTF-8, HTML/SVG, model/PDF, symlink replacement | Clear unavailable/unsupported/error state; no HTML execution or broad frontend filesystem permission |
+
+Apple Silicon macOS debug WKWebView acceptance on 2026-10-07 verified prefix grouping/exact filtering/folder scope, Stop and recovery, bounded native text/PNG previews, single-file Trash Cancel/Confirm, actual OS Trash contents, exact-path restore and metadata recovery. Separate app-data and synthetic assets were used; see [progress log](progress-log.md). Optimized bundled release checks subsequently confirmed/fixed raster image CSP; complete release control matrix passed only with scratch disabled background throttling. Follow-up default-throttling optimized app passed 15-second opaque-window occlusion/reactivation checks3/3, with previews/filtering/Rescan intact. True Hide/minimize, sleep/wake and long-background recovery remain unverified. This does not cover Finder Put Back UI, folder/bulk/partial Trash platform flows, native picker UI or signed/distribution builds. Remaining cases still require native execution on disposable assets; browser mocked-hook smoke does not prove system Trash or native file reads.
 
 ## Spaces, Unicode and OneDrive
 

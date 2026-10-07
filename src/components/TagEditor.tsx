@@ -1,6 +1,5 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Plus, X } from "lucide-react";
-import { tagGroup } from "../catalog";
 
 interface TagEditorProps {
   tags: string[];
@@ -55,7 +54,7 @@ export function TagEditor({ tags, availableTags, disabled = false, busy = false,
     <div className={`tag-editor ${compact ? "tag-editor-compact" : ""}`} onClick={stopRowEvent} onKeyDown={stopRowEvent}>
       <div className="tags-content">
         {tags.map((tag) => (
-          <span className={`tag-chip tag-${tagGroup(tag).toLowerCase()} ${compact ? "tag-small" : ""}`} key={tag} title={tag}>
+          <span className={`tag-chip ${compact ? "tag-small" : ""}`} key={tag} title={tag}>
             <button type="button" className="tag-label-button" disabled={!onFilter} onClick={(event) => { stopRowEvent(event); onFilter?.(tag); }} onKeyDown={stopRowEvent}>{tag}</button>
             <button type="button" className="tag-remove" aria-label={`Remove tag ${tag}`} title={`Remove ${tag}`} disabled={disabled || busy} onClick={(event) => { stopRowEvent(event); void removeTag(tag); }} onKeyDown={stopRowEvent}>
               <X size={compact ? 11 : 12} aria-hidden="true" />

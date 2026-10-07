@@ -1,3 +1,11 @@
+# Backlog: Theme settings (requested 2026-10-06)
+
+- Implement only after key functions/features are completed and verified.
+- Add app theme settings with palette presets inspired by attached 4×5 gradient color grid: coral/magenta, blue/lavender, navy/teal, mint/aqua, warm orange/pink, muted pastel gray, and dark burgundy/indigo variants.
+- Keep dense catalog readable; apply palette through consistent UI tokens, with contrast checks for text, selection, errors and disabled controls. Do not turn each table row into a saturated gradient.
+- Persist chosen theme in app-local settings, not library metadata; preserve existing library roots and saved searches.
+- No theme implementation in current controls/cancellation/trash/preview task.
+
 # Notes: Milestone 5 contract
 
 - Commands: asset_action(libraryId,assetId,action enum), validate_metadata(libraryId), reconnect_targets(libraryId,assetId,expectedRevision), reconnect_asset(libraryId,assetId,expectedRevision,targetAssetId), export_metadata(libraryId) with native save picker only. No arbitrary frontend paths.

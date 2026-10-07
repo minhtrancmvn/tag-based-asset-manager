@@ -51,8 +51,10 @@ describe("mock catalog filtering", () => {
 
 describe("tag grouping", () => {
   it.each([
-    ["category:animal", "Category"], ["style:flexi", "Style"], ["theme:fantasy", "Theme"],
-    ["status:printed", "Status"], ["material:pla", "Other"], ["favorite", "Other"],
+    ["category:animal", "category"], ["style:flexi", "style"], ["theme:fantasy", "theme"],
+    ["status:printed", "status"], ["material:pla", "material"], ["favorite", "favorite"],
+    ["oole:identity", "oole"], ["oole:identity:brand", "oole"], ["MATERIAL:pla", "material"],
+    ["other:custom", "other"], ["chất-liệu:nhựa", "chất-liệu"],
   ])("classifies %s as %s", (tag, group) => expect(tagGroup(tag)).toBe(group));
 });
 
@@ -62,6 +64,16 @@ describe("sorting and formatting", () => {
     const sorted = sortAssets(mockAssets, "name", "asc");
     expect(sorted[0].name).toBe("Animals");
     expect(mockAssets.map((asset) => asset.id)).toEqual(original);
+  });
+  it("lists every folder before files for both directions", () => {
+    for (const direction of ["asc", "desc"] as const) {
+      for (const key of ["name", "tags", "type", "path", "modified", "size", "status"] as const) {
+        const sorted = sortAssets(mockAssets, key, direction);
+        const firstFile = sorted.findIndex((asset) => asset.kind === "file");
+        expect(sorted.slice(0, firstFile).every((asset) => asset.kind === "folder")).toBe(true);
+        expect(sorted.slice(firstFile).every((asset) => asset.kind === "file")).toBe(true);
+      }
+    }
   });
   it("sorts numeric sizes and keeps empty sizes first ascending", () => {
     const sorted = sortAssets(mockAssets, "size", "asc");

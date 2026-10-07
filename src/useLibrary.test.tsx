@@ -26,6 +26,8 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
     exportMetadata: vi.fn().mockResolvedValue(null),
     getReconnectTargets: vi.fn().mockResolvedValue([]),
     reconnectAsset: vi.fn().mockResolvedValue({ ...scanResult, scanId: "repair" }),
+    deleteAssets: vi.fn().mockResolvedValue({ completedIds: ["path:a.stl"], error: null }),
+    previewAsset: vi.fn().mockResolvedValue({ kind: "text", content: "preview", mimeType: "text/plain", truncated: false, message: null }),
     ...overrides,
   };
 }
@@ -77,10 +79,88 @@ describe("native library lifecycle", () => {
     await act(async () => { expect(await result.current.cancelScan()).toBe(true); });
     expect(api.cancelScan).toHaveBeenCalledWith("root1", expect.any(String));
     expect(result.current.scanning).toBe(false);
+    expect(result.current.scanStopped).toBe(true);
     expect(result.current.assets).toEqual([]);
     await act(async () => { pending.resolve(scanResult); });
     expect(result.current.assets).toEqual([]);
     expect(result.current.scanning).toBe(false);
+  });
+  it("ignores late progress and cancellation errors after a new library is chosen", async () => {
+    const oldScan = deferred<ScanResult>();
+    const cancellation = deferred<boolean>();
+    let report!: (value: ScanProgress) => void;
+    let oldId = "";
+    const otherState = { libraries: [...registered.libraries, { ...registered.libraries[0], id: "root2" }], activeLibraryId: "root2" };
+    const api = client({
+      scan: vi.fn((libraryId, scanId, progress) => {
+        if (libraryId === "root1") { report = progress; oldId = scanId; return oldScan.promise; }
+        return Promise.resolve({ ...scanResult, libraryId, scanId });
+      }),
+      cancelScan: vi.fn(() => cancellation.promise),
+      choose: vi.fn().mockResolvedValue(otherState),
+    });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.scanning).toBe(true));
+    let stop!: Promise<boolean>;
+    act(() => { stop = result.current.cancelScan(); });
+    await act(() => result.current.chooseLibrary());
+    await waitFor(() => expect(result.current.library?.id).toBe("root2"));
+    act(() => report({ libraryId: "root1", scanId: oldId, visited: 99999 }));
+    await act(async () => { cancellation.reject(new Error("old cancel failed")); await stop; oldScan.resolve(scanResult); });
+    expect(result.current.error).toBeNull();
+    expect(result.current.library?.id).toBe("root2");
+    expect(result.current.progress).not.toBe(99999);
+  });
+  it("cancels native scan on unmount", async () => {
+    const api = client({ scan: vi.fn(() => new Promise<ScanResult>(() => {})) });
+    const { result, unmount } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.scanning).toBe(true));
+    unmount();
+    expect(api.cancelScan).toHaveBeenCalledWith("root1", expect.any(String));
+  });
+  it("deletes confirmed assets through the native command and applies the fresh scan", async () => {
+    const api = client();
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(async () => { expect(await result.current.deleteAssets(result.current.assets)).toBe(true); });
+    expect(api.deleteAssets).toHaveBeenCalledWith("root1", [{ assetId: "path:a.stl", expectedRevision: "rev1" }]);
+    expect(result.current.assets).toEqual([]);
+    expect(result.current.deleting).toBe(false);
+  });
+  it("refuses to delete the library root or blocked rows without calling native", async () => {
+    const api = client();
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(async () => {
+      expect(await result.current.deleteAssets([{ ...result.current.assets[0], relativePath: "." }])).toBe(false);
+      expect(await result.current.deleteAssets([{ ...result.current.assets[0], metadataState: "blocked" }])).toBe(false);
+      expect(await result.current.deleteAssets([{ ...result.current.assets[0], status: "missing" }])).toBe(false);
+    });
+    expect(api.deleteAssets).not.toHaveBeenCalled();
+  });
+  it("applies completed trash targets even when a later target fails", async () => {
+    const second = { ...scanResult.assets[0], id: "path:b.stl", name: "b.stl", relativePath: "b.stl" };
+    const api = client({
+      scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: [scanResult.assets[0], second] })),
+      deleteAssets: vi.fn().mockResolvedValue({ completedIds: ["path:a.stl"], error: { message: "1 of 2 items moved to Trash", path: "b.stl", details: "denied" } }),
+    });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(2));
+    await act(async () => { expect(await result.current.deleteAssets(result.current.assets)).toBe(false); });
+    expect(result.current.assets.map((asset) => asset.id)).toEqual(["path:b.stl"]);
+    expect(result.current.error?.message).toContain("1 of 2 items moved to Trash / Recycle Bin.");
+  });
+  it("drops cached descendants when their selected parent is trashed", async () => {
+    const folder = { ...scanResult.assets[0], id: "path:Folder", name: "Folder", relativePath: "Folder", kind: "folder" as const };
+    const child = { ...scanResult.assets[0], id: "path:Folder/a.stl", relativePath: "Folder/a.stl" };
+    const api = client({
+      scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: [folder, child] })),
+      deleteAssets: vi.fn().mockResolvedValue({ completedIds: [folder.id], error: null }),
+    });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(2));
+    await act(async () => { expect(await result.current.deleteAssets([folder])).toBe(true); });
+    expect(result.current.assets).toEqual([]);
   });
   it("ignores stale scan results after library removal", async () => {
     const pending = deferred<ScanResult>();

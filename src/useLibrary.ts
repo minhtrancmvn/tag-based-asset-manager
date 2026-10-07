@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LibraryClient } from "./native";
 import { nativeClient, toAppError } from "./native";
-import type { AppError, Asset, AssetAction, ExportResult, LibraryState, ScanIssue, SearchFilters, ValidationReport } from "./types";
+import type { AppError, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, ScanIssue, SearchFilters, ValidationReport } from "./types";
 
 const emptyState: LibraryState = { libraries: [], activeLibraryId: null };
 
@@ -11,6 +11,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [issues, setIssues] = useState<ScanIssue[]>([]);
   const [loading, setLoading] = useState(client.isDesktop);
   const [scanning, setScanning] = useState(false);
+  const [scanStopped, setScanStopped] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<AppError | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
@@ -18,6 +19,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [savingSearch, setSavingSearch] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [validation, setValidation] = useState<ValidationReport | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const scanBusy = useRef(false);
@@ -37,6 +39,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     setIssues([]);
     setProgress(0);
     setScanning(true);
+    setScanStopped(false);
     scanBusy.current = true;
     setError(null);
     setValidation(null);
@@ -44,7 +47,8 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       const result = await client.scan(libraryId, scanId, (update) => {
         if (current() && update.libraryId === libraryId && update.scanId === scanId) setProgress(update.visited);
       });
-      if (!current() || request.cancelled || result === null) return;
+      if (!current() || request.cancelled) return;
+      if (result === null) { setScanStopped(true); return; }
       if (result.libraryId !== libraryId || result.scanId !== scanId) throw new Error("Scan response did not match the requested library.");
       setAssets(result.assets);
       setIssues(result.issues);
@@ -71,21 +75,29 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     const scan = activeScan.current;
     if (!client.isDesktop || !scan || scan.cancelled) return false;
     scan.cancelled = true;
-    ++scanGeneration.current;
+    const generation = ++scanGeneration.current;
     setAssets([]);
     setIssues([]);
     setScanning(false);
+    setScanStopped(true);
     scanBusy.current = false;
     activeScan.current = null;
     try {
       return await client.cancelScan(scan.libraryId, scan.scanId);
     } catch (failure) {
-      if (mounted.current) setError(toAppError(failure));
+      if (mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === scan.libraryId) setError(toAppError(failure));
       return false;
     }
   }, [client]);
 
   const applyState = useCallback((next: LibraryState) => {
+    const previous = activeScan.current;
+    if (previous) {
+      previous.cancelled = true;
+      void client.cancelScan(previous.libraryId, previous.scanId).catch((failure) => {
+        if (mounted.current && stateRef.current.activeLibraryId === next.activeLibraryId) setError(toAppError(failure));
+      });
+    }
     activeScan.current = null;
     ++scanGeneration.current;
     stateRef.current = next;
@@ -96,9 +108,11 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     setIssues([]);
     setProgress(0);
     setScanning(false);
+    setScanStopped(false);
+    setDeleting(false);
     scanBusy.current = false;
     if (next.activeLibraryId) void scan(next.activeLibraryId);
-  }, [scan]);
+  }, [client, scan]);
 
   useEffect(() => {
     mounted.current = true;
@@ -113,7 +127,18 @@ export function useLibrary(client: LibraryClient = nativeClient) {
         if (!cancelled) setLoading(false);
       });
     }
-    return () => { cancelled = true; mounted.current = false; ++scanGeneration.current; };
+    return () => {
+      cancelled = true;
+      mounted.current = false;
+      ++scanGeneration.current;
+      const pending = activeScan.current;
+      activeScan.current = null;
+      if (pending) {
+        pending.cancelled = true;
+        // Unmount has no error surface; cancellation is best effort while native task winds down.
+        void client.cancelScan(pending.libraryId, pending.scanId).catch(() => {});
+      }
+    };
   }, [client, applyState]);
 
   const mutateRegistration = useCallback(async (action: () => Promise<LibraryState | null>) => {
@@ -137,7 +162,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const removeLibrary = useCallback((id: string) => mutateRegistration(() => client.remove(id)), [client, mutateRegistration]);
   const rescan = useCallback(async () => {
     const id = stateRef.current.activeLibraryId;
-    if (client.isDesktop && id && !operation.current) await scan(id);
+    if (client.isDesktop && id && !operation.current && !scanBusy.current) await scan(id);
   }, [client, scan]);
   const editTags = useCallback(async (asset: Asset, addTags: string[], removeTags: string[]): Promise<boolean> => {
     const libraryId = stateRef.current.activeLibraryId;
@@ -270,15 +295,53 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       return true;
     }, true);
   }, [client, runNativeOperation]);
+  const deleteAssets = useCallback(async (targets: Asset[]): Promise<boolean> => {
+    const libraryId = stateRef.current.activeLibraryId;
+    if (!client.isDesktop || !libraryId || operation.current || scanBusy.current || targets.length === 0) return false;
+    if (targets.some((asset) => asset.relativePath === "." || asset.status === "missing" || asset.metadataState === "blocked" || !asset.metadataRevision)) return false;
+    if (new Set(targets.map((asset) => asset.id)).size !== targets.length) return false;
+    operation.current = true;
+    const generation = scanGeneration.current;
+    const current = () => mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId;
+    setDeleting(true);
+    setError(null);
+    try {
+      const result = await client.deleteAssets(libraryId, targets.map((asset) => ({ assetId: asset.id, expectedRevision: asset.metadataRevision! })));
+      if (!current()) return false;
+      const requested = new Map(targets.map((asset) => [asset.id, asset]));
+      if (new Set(result.completedIds).size !== result.completedIds.length || result.completedIds.some((id) => !requested.has(id))) throw new Error("Delete response did not match selected assets.");
+      const removed = result.completedIds.map((id) => requested.get(id)!);
+      setAssets((rows) => rows.filter((row) => !removed.some((asset) => row.id === asset.id || (asset.kind === "folder" && row.relativePath.startsWith(`${asset.relativePath}/`)))));
+      setValidation(null);
+      setExportResult(null);
+      if (result.error) { setError({ ...result.error, message: `${result.completedIds.length} of ${targets.length} items moved to Trash / Recycle Bin. ${result.error.message}` }); return false; }
+      if (result.completedIds.length !== targets.length) throw new Error("Delete response omitted selected assets.");
+      return true;
+    } catch (failure) {
+      if (current()) setError(toAppError(failure));
+      return false;
+    } finally {
+      operation.current = false;
+      if (mounted.current) setDeleting(false);
+    }
+  }, [client]);
+  const previewAsset = useCallback(async (asset: Asset): Promise<PreviewResult | null> => {
+    const libraryId = stateRef.current.activeLibraryId;
+    if (!client.isDesktop || !libraryId || asset.status === "missing" || scanBusy.current || operation.current) return null;
+    const generation = scanGeneration.current;
+    const result = await client.previewAsset(libraryId, asset.id);
+    return mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId ? result : null;
+  }, [client]);
   const dismissError = useCallback(() => setError(null), []);
 
   return {
     state, library: state.libraries.find((library) => library.id === state.activeLibraryId) ?? null,
-    assets, issues, loading, scanning, progress, error, cancelScan,
+    assets, issues, loading, scanning, scanStopped, progress, error, cancelScan,
     chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId,
     bulkEditTags, bulkEditing, savedSearches: (state.savedSearches ?? []).filter((search) => search.libraryId === state.activeLibraryId),
     savingSearch, saveSearch, deleteSearch, performAction, actionBusy,
     validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, recoveryBusy,
+    deleteAssets, deleting, previewAsset,
     dismissError, isDesktop: client.isDesktop,
   };
 }

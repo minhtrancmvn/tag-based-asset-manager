@@ -1,3 +1,211 @@
+# Task Plan: Cleanup and local main merge
+
+## Goal
+Remove verified task-owned temporary data and redundant diagnostics, validate feature changes, commit on feature branch and merge locally into main without pushing.
+
+## Phases
+- [ ] Phase 1: Inventory ownership, diff scope and safe cleanup targets
+- [ ] Phase 2: Remove owned temporary/redundant files and synchronize durable evidence
+- [ ] Phase 3: Run full tests/build/lint, independent review and GitNexus change detection
+- [ ] Phase 4: Confirm staging/message, commit feature and merge main; verify final state
+
+## Decisions Made
+- Preserve user-created manual test library, user settings, unrelated projects and recoverable worktree backups.
+- Keep durable progress/manual/debug observations; remove stale .debug-session.md (facts already recorded) and generated caches only when safe.
+- User requested local merge; no push or remote publication.
+- Preserve pre-existing CLAUDE.md worktree guidance separately unless user includes it in staging confirmation.
+
+## Errors Encountered
+- Inventory agent searched isolated stale copy and included unrelated workspace-manager projects; exclude all unrelated paths and verify primary targets directly.
+
+## Status
+**Phase 1** — Review/inventory underway; no cleanup deletion or commit yet.
+
+---
+
+# Task Plan: Native actions and reconnect acceptance
+
+## Goal
+Verify native copy/reveal/open and confirmed reconnect UI on synthetic assets; record picker/export UI limits without requesting host permissions.
+
+## Phases
+- [x] Phase 1: Check host access and prepare isolated runtime/synthetic metadata
+- [x] Phase 2: Drive supported Reveal dispatch and reconnect Cancel/Confirm/restart; unsupported host flows skipped
+- [x] Phase 3: Verify preservation/results/screenshots, record manual gates and clean owned runtime
+
+## Decisions Made
+- Accessibility trusted=false; native picker/save-panel selection/cancel UI cannot be automated with current host access. Do not invoke dialogs that cannot be safely closed or bypass native destination selection.
+- Reconnect only synthetic missing entry to explicitly selected synthetic same-folder untagged file; no user libraries/settings.
+- Clipboard test must preserve existing clipboard without reading/logging contents; skip unless exact preservation possible.
+- Existing branch/uncommitted work preserved; no commits/pushes.
+
+## Errors Encountered
+- None yet.
+
+## Status
+**Supported native checks verified; manual host gates explicit** — Missing-file actions disabled; reconnect candidates same-folder/untagged only; Cancel+Review byte-identical manifest; Confirm exact-entry transfer preserving UUID/tags/notes/custom/unrelated fields/assets; restart tags/UUID/notes recovered. Reveal native dispatch completed without error; Finder selection not visually verified. Accessibility false; native picker/export UI skipped, Clipboard/Open skipped to preserve host state. Frontend190/13 pass6.65s; Rust79pass1ignored; default debug build restored2.95s; zero warning/error/CSP events. App-only screenshot inspected; fixture/asset hashes preserved; only intended synthetic sidecar changed. Owned app/server/library/settings cleaned. Evidence /private/var/folders/d3/47mnxs2x33q95gbms0193hxr0000gn/T/tag-actions-acceptance-gjhxc3wb/. No app source/config edits, commits/pushes. Human native picker/actions/export and platform/distribution acceptance pending.
+
+---
+
+# Task Plan: Default-policy background recovery
+
+## Goal
+Distinguish background observer suspension from user-visible failure by hiding/reactivating optimized WKWebView under unchanged production window policy.
+
+## Phases
+- [x] Phase 1: Recreate isolated synthetic library and verify default-policy control binary
+- [x] Phase 2: Repeat visible/occluded/reactivated preview/filter/Rescan checks across three fresh sessions; true Hide unavailable
+- [x] Phase 3: Inspect app-only screenshots, record evidence/limits, clean owned runtime
+
+## Decisions Made
+- Reuse archived optimized binary with corrected production image policy and no throttling override; no default executable overwrite.
+- Observer suspension while hidden alone is not application failure. Require visible recovery or reproducible visible defect before changing code.
+- Synthetic library/separate app-data only; no commits/pushes or user settings access.
+
+## Errors Encountered
+- Initial driver activated process before NSRunningApplication registration (3 setup failures, no app interaction). Added bounded startup retry.
+- Bare CLI executable and temporary .app wrapper both returned hide=false/hidden=false; their usable sessions are controls only, not hidden recovery. Switched to opaque full-screen owned overlay for 15-second occlusion, then foreground activation; preserve true Hide/minimize/sleep limits.
+- One no-op Edit rejected; no workspace change from that call.
+
+## Status
+**Bounded default-policy occlusion recovery verified** — Archived optimized bundle with current image CSP/default throttling, temporary .app wrapper, 15s opaque overlay, then active=true: full recovery sequence3/3, snapshots0.050/0.129/0.111s, eight rows/PNG/text/exact-filter/navigation/validation/Rescan intact; zero runtime warning/error/CSP. App-only screenshots3 inspected. Hide returned false (excluded controls); true Hide/minimize/sleep/wake/longbackground remain unverified. Frontend190/13 pass7.74s; fixture7/synthetic10 hashes preserved. Owned app/overlay/receiver/library/settings/wrapper cleaned; default executable untouched, only primary worktree. No source/config/window-policy edits, commits or pushes.
+
+---
+
+# Task Plan: Optimized WKWebView blank-window investigation
+
+## Goal
+Reproduce optimized custom-protocol selection failure on existing synthetic library, isolate cause without accessing user libraries, and verify any confirmed fix.
+
+## Phases
+- [x] Phase 1: Reproduce three fresh sessions and collect crash/runtime evidence
+- [x] Phase 2: Rank transport, rendering and instrumentation hypotheses
+- [x] Phase 3: Confirm image-CSP defect and RED regression; blank timeout isolated separately
+- [x] Phase 4: Verify image fix natively/full suites; test scratch-only suspension control
+- [x] Phase 5: Record learning and restore default executable/clean owned runtime
+
+## Decisions Made
+- Preserve feature branch and all existing uncommitted work; no commits/pushes.
+- Existing release acceptance library/identifier only; user libraries/settings off-limits.
+- No source fix before deterministic reproduction and impact analysis.
+
+## Errors Encountered
+- Existing release observer snapshot timed out after 30 seconds on already blank WKWebView.
+- GitNexus query index predates preview symbols; index coverage limited.
+- Requested useLibrary offset exceeded file length; corrected bounded read.
+
+## Status
+**Phase 5** — Image CSP defect independently fixed (img-src data: only) with config regression/native PNG GREEN; scripts/docs remain restricted. Full optimized sequence passes3/3 under scratch-only disabled throttling+foreground, zero runtime warning/error/CSP events. Default-background acceptance unresolved; production window-policy unchanged. 190frontend tests/build,79Rust/1ignored,fmt/strictClippy pass. Fixture7/synthetic10 hashes preserved; only native.test.ts source changed, config image scheme changed; owned app/receiver/library/settings removed. App-window screenshot inspected. Final default release rebuild passed3m47s; frontend final rerun190/13 in28.14s. Default-background/recovery remains release gate, not claimed fixed. No commits/pushes.
+
+---
+
+# Task Plan: Isolated release acceptance
+
+## Goal
+Exercise bundled production frontend in optimized native WKWebView, retaining production image CSP and using synthetic assets/separate app-data.
+
+## Phases
+- [ ] Phase 1: Build isolated optimized executable with copied bundled frontend and bounded observer
+- [ ] Phase 2: Drive prefix filtering/navigation and native preview checks; inspect app-only screenshot
+- [ ] Phase 3: Record verified results/limits, clean owned data and restore default executable
+
+## Decisions Made
+- No user libraries/settings or app source changes; preserve current branch/uncommitted work.
+- Scratch observer may add loopback telemetry connection to copied config, but must retain production image/script policy and bundled UI.
+- No signed/distribution/cross-platform acceptance claim from instrumented local executable.
+
+## Errors Encountered
+- Scratch receiver method `headers` collided with BaseHTTPRequestHandler.headers, causing observer fetch failures and three action timeouts. Renamed receiver method; application code unchanged.
+
+## Status
+**Phase 2** — Optimized custom-protocol bundle built in 2m 19s; exercising release UI with corrected receiver.
+
+---
+
+# Task Plan: Isolated native acceptance
+
+## Goal
+Verify prefix grouping and native catalog controls/previews/Trash on disposable assets with separate app-data, preserving user libraries/settings and repository fixtures.
+
+## Phases
+- [x] Phase 1: Inspect reusable host drivers and set up isolated runtime
+- [x] Phase 2: Drive real app grouping, folder navigation and exact filtering
+- [x] Phase 3: Exercise native Stop, bounded previews and confirmed Trash/restore where host allows
+- [x] Phase 4: Record evidence and limits, verify preservation and stop owned runtime
+
+## Decisions Made
+- Existing feat/table-folder-up-button branch and uncommitted work preserved; no commit/push.
+- Use unique test identifier, synthetic/copied fixture only; no real library access.
+- Native safety-sensitive actions only on assets created for this acceptance run.
+- Theme settings remain deferred until core acceptance is established.
+
+## Errors Encountered
+- Seeded macOS /var temporary root was not canonical (/private/var); native scanner correctly refused it. Canonicalized disposable settings and relaunched; no application fix required.
+- Image CSP initially considered for diagnostic override; retained production policy instead to avoid masking rendering failures.
+
+## Status
+**Host debug acceptance verified; broader native release acceptance pending** — Real Tauri WKWebView grouped prefixes/plain/Unicode, exact-filtered and navigated folders. Native literal text/64 KiB truncation/UTF-8 rejection/HTML unsupported/decoded PNG verified. Cancel/confirmed single synthetic file Trash, OS Trash hash, exact-path restore and UUID/tags recovery pass. Stop on 40,000-file workload at 256 visited clears partial rows/unlocks controls; Rescan recovers; metadata validation 13 checked. Rust79pass/1ignored; isolated and restored-default debug builds pass; zero warning/error/CSP events. Repository fixture7 and synthetic13 file hashes unchanged. App-window screenshot inspected; accidental desktop screenshot removed. Owned app/server/library/settings/workload cleaned; only primary worktree. Evidence under /var/folders/d3/47mnxs2x33q95gbms0193hxr0000gn/T/tag-native-acceptance-hk8mhzs3/. Native picker/open/reveal/clipboard/reconnect/export UI, Finder Put Back, folder/bulk/partial Trash, production CSP/release, Windows/Intel/OneDrive unverified. No app code/config changes, commits or pushes.
+
+---
+
+# Task Plan: Prefix-derived tag groups
+
+## Goal
+Remove fixed tag groups; derive each group from tag text before first colon, using whole name for plain tags.
+
+## Phases
+- [x] Phase 1: Inspect grouping consumers and impact
+- [x] Phase 2: Add regression tests and replace fixed groups
+- [x] Phase 3: Verify full frontend tests/build and update affected docs
+
+## Decisions Made
+- Preserve existing uncommitted work on feat/table-folder-up-button; no commit/push.
+- Grouping affects presentation only; preserve stored tags and exact filtering.
+
+## Errors Encountered
+- Initial lookup agent failed with provider HTTP 503 before returning results; resume with available frontend specialist.
+- Resume sources HANDOFF.json and .continue-here.md absent; task_plan.md and live conversation supply state.
+
+## Status
+**Verified** — Fixed group list/union/colors removed; lowercase first-part groups built from current-folder tag counts in one pass and sorted alphabetically. Plain tags use whole name; nested suffixes preserved; exact filter/stored tags unchanged. Baseline 183 tests passed; 13 RED regressions confirmed; full suite 189 tests/13 files and TypeScript/Vite production build pass. Build emitted plugin timing notice. Scoped baseline diffs reviewed; no backend edits, native/browser rerun, commits or pushes. Read-only task agent worktrees auto-cleaned; earlier worktree untouched.
+
+---
+
+# Task Plan: Catalog controls, cancellation, trash and previews
+
+## Goal
+Move Up into catalog toolbar, allow scan Stop, keep folders first, add confirmed Trash/Recycle Bin for files/folders and safe Details previews.
+
+## Phases
+- [x] Phase 1: Inspect scanner, metadata safety and impact
+- [x] Phase 2: Complete cancellable scan, confirmed trash and preview contracts/backend/frontend
+- [x] Phase 3: Run frontend/Rust suites, builds and isolated browser smoke
+- [x] Phase 4: Update docs and deliver without further commits unless requested
+
+## Key Questions
+1. How does cancellation prevent stale results and preserve completed metadata?
+2. How does trash validate all targets and report partial completion without unsafe metadata writes?
+3. Which bounded preview formats are supported without executing asset code?
+
+## Decisions Made
+- Preserve existing unstaged CLAUDE.md change. Work on feat/table-folder-up-button.
+- Recursive indexing remains unchanged pending explicit lazy-scan request; explain first-scan cost.
+- Trash only, never permanent-delete fallback. Explicit confirmation includes folder contents; root and missing assets rejected. Sidecars remain for recovery, except those naturally moved inside trashed folders.
+- Preview bounded images and text first; no HTML execution, unsupported formats explicitly identified.
+- Stop invalidates current UI result and cancels backend cooperatively, not merely hides progress. OS filesystem calls already in progress cannot be interrupted.
+
+## Errors Encountered
+- Repeated parallel frontend tests timed out at 5 seconds; rerun passed without raising timeouts.
+- Native build absent cargo PATH; Homebrew rustup path used.
+- Delete prototype borrow error and stale revision test corrected; unsafe permanent-delete prototype to be replaced before delivery.
+- Folders-first sorting invalidated row-index assumptions in three UI tests; switch to ID-based assertions.
+- Initial Vite start failed because existing server occupies 1420; use existing server, do not stop user process.
+
+## Status
+**Implemented and verified within host boundary** — Up/Stop, folders-first, confirmed Trash/Recycle Bin, Details text/image preview and full custom prefixes under Other implemented. 183 frontend tests pass, 79 Rust tests pass (one ignored), fmt/Clippy and browser inert-hook smoke pass. Final native release rebuild passed in 3m 12s; native platform Trash/preview/manual acceptance remains unverified. Independent Trash freshness issue fixed with deterministic per-target replacement regression. Theme presets deferred in notes.md. Initial d1281ea local commit predates expanded scope; current work uncommitted and no pushes.
+
+---
+
 # Task Plan: Current-folder browsing
 
 ## Goal
