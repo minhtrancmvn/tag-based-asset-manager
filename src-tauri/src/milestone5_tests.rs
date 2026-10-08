@@ -439,7 +439,9 @@ fn export_cancel_writes_nothing_and_existing_destinations_are_never_overwritten(
     fs::write(&destination, b"ordinary asset").unwrap();
     assert!(export_with_picker(&state, "library", || Ok(Some(destination.clone()))).is_err());
     assert_eq!(fs::read(&destination).unwrap(), b"ordinary asset");
-    let traversal = root.join("../escape.json");
+    let mut traversal = root.as_os_str().to_os_string();
+    traversal.push(format!("{0}..{0}escape.json", std::path::MAIN_SEPARATOR));
+    let traversal = PathBuf::from(traversal);
     assert!(
         traversal
             .components()
