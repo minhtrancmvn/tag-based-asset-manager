@@ -1,3 +1,35 @@
+# Task Plan: Consolidated release checklist (2026-10-08)
+
+## Goal
+Create one evidence-backed release status document that separates automated/build/manual results from deferred gates and unresolved risks.
+
+## Phases
+- [x] Gathered durable result boundaries/current main CI; source95a287a/current Windows main run verified.
+- [x] Wrote docs/release-readiness.md; README/manual links and chronological progress summary updated.
+- [x] Claims independently reviewed; evidence gaps resolved with direct main-CI/Intel-graph/OneDrive-delta JSON. Local links/diff and final cleanup checks verified.
+- [x] User-requested cleanup removed94 task-owned files/30,838,118bytes; retained evidence/backups verified. Active app/settings with user-added registration preserved; cloud root empty.
+- [x] Delivered checklist and exact five-file documentation scope for commit approval; no commit/push/release yet.
+
+## Key Questions
+1. What actually passed, on which platform/build and with what evidence?
+2. Which checks remain deferred or unverified, despite passing host tests?
+3. What blocks public distribution and what is next actionable check?
+
+## Decisions Made
+- Work on docs/release-readiness-checklist; preserve historical plans below.
+- Signing/notarization deferred until Developer account; Windows manual deferred by user.
+- Local OneDrive verification is not cross-device/cross-OS proof; manual sleep/wake remains user-reported.
+- Repository documentation only; no hosted report, source changes or automatic commits.
+
+## Errors Encountered
+- Evidence reviewer API watchdog failure; resumed bounded review. Initial three evidence-scope gaps resolved with additional small JSONs; no factual overclaims remained.
+- Cleanup found active test app/settings with non-test registration. Preserved both and did not read/mutate associated library. Deleted only verified synthetic paths; recorded exception.
+
+## Status
+Checklist/links/evidence verification complete; public distribution NO-GO with explicit deferred gates. User-requested test/redundant data cleanup complete except preserved active user-expanded app/settings. Five documentation files pending commit approval. No source changes, commit/push or release.
+
+---
+
 # Task Plan: Windows export CI failure (2026-10-08)
 
 ## Goal
