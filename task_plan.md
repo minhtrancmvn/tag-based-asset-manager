@@ -1,3 +1,52 @@
+# Task Plan: Release-readiness checks (2026-10-08)
+
+## Goal
+Verify host-supported blank-window recovery, native Trash behavior, and distribution/platform readiness using disposable assets and isolated app-data. Report unavailable environments and manual gates without treating them as passes.
+
+## Native label acceptance and commit preparation (2026-10-08)
+- [x] Rebuilt isolated optimized app; frontend211/15 (5.75s), Rust88/1ignored (0.62s), build/fmt/strictClippy/diff gates passed.
+- [ ] Native label/dialog acceptance blocked: two bounded filename/row clicks did not select item before timeout. Startup four tagged rows/Needs attention0 verified; no delete confirmation, all six baseline hashes unchanged. Preserved Finder .DS_Store excluded from baseline comparison; initial strict equality failed safely before launch.
+- [x] Exact diff, GitNexus low-risk change scope and sensitive scan reviewed. User approved both commit groups/messages. Source/test commit4fa58b2 created and verified; approved documentation commit next. No push or merge authorized.
+
+## Inspector delete clarification (approved 2026-10-08)
+- [x] RED: Explicit Delete this item label missing; corrected fixture ordering to two named files; failure verified.
+- [x] GREEN: Renamed inspector label/title only; requestDelete(selected, false), bulk/context semantics and confirmation preserved.
+- [x] Verify: Frontend211/15 in6.30s, build1.29s, diff check and independent source/test review pass. Updated label native visual check not rerun; open app remains prior build. User-reported manual passes documented separately from hashes. No commit/push.
+- GitNexus App upstream impact LOW, zero indexed callers/processes; index limitations retained.
+- User reports supplied manual checks passed except ambiguous inspector Delete label. Subsequent folder/manual and bulk/create-only recovery completed; all six original hashes match, final Rescan screenshot four tagged rows/Needs attention0. Finder bulk Put Back/forced partial failure not claimed.
+- Plan Edit initially matched18 historical phase headings and failed safely; retried with unique release-readiness context. Inspector test fixture initially mixed folder/file and folders-first order changed latest target; corrected to two files before implementation.
+
+## Phases
+- [x] Phase 1: Inspect retained harness, native safety boundary, host/platform availability and signing setup.
+- [x] Phase 2: Fresh isolated optimized app first-run/Hide/minimize3/3; six screenshots inspected. Historical blank unresolved; populated-library/sleep/long-background unverified.
+- [x] Phase 3 bounded normal flows: User folder/bulk manual checks and final Rescan screenshot pass; four root rows/tags restored, Needs attention0, all six original hashes match. Inspector label clarified/tested. Folder restored manually; bulk files recovered create-only from exact Trash paths. Finder bulk Put Back and forced native partial-failure remain unverified, outside this passed normal-flow boundary.
+- [x] Phase 4: Fresh app/DMG build/checksum/copy/isolated-launch checks and regression gates recorded; signed/platform gates explicitly blocked.
+
+## Decisions Made
+- Work on test/release-readiness; no commits, push, branch cleanup or release publication requested.
+- Preserve existing acceptance evidence, recoverable backups, real settings and user-created manual libraries.
+- No native picker authorization bypass or new host permissions. Do not force system sleep without separate approval.
+- Windows, Intel macOS and OneDrive acceptance require matching native environments; cross-compilation alone is not runtime acceptance.
+- Production fixes require reproducible evidence, symbol impact analysis and failing regression test first.
+- Resume: previous temporary evidence disappeared. Recreate isolated acceptance with durable evidence under /Users/coffeemug/Programming/tag-based-asset-manager-release-evidence/release-20261008-58bwlu7l; maximum two picker attempts, then manual gate. Original production identifier never launched.
+
+## Errors Encountered
+- Screenshot helper compilation with -parse-as-library rejected existing top-level async entrypoint; compiled as executable without that flag instead.
+- Trash inspection agent API watchdog/malformed response; resumed same agent and obtained bounded source/selector report.
+- Initial observer snapshot preceded React mount (empty DOM); same launch screenshot showed complete catalog. Require readiness condition before assertions.
+- Initial Hide helper used activate without unhide; hidden state persisted. Added explicit unhide; window returns onscreen but active state can lag/remain false. Do not claim focus recovery from API return alone.
+- Native picker shortcut posted directly to PID did not open Go to Folder; frontmost-owned HID shortcut opened it. Return had same issue; corrected guarded Return and waited for nested path sheet closure. Previous attempts canceled without authorizing library or executing Trash.
+- Whole-window Accessibility diagnostic exposed native picker sidebar/recent-item labels; keep local, never publish. Subsequent traversal excludes native browser/sidebar/menu trees.
+- Debug continuation 2026-10-08: referenced `/private/tmp/release-readiness-20261008.t92rg5fl` and `/tmp/release-readiness-20261008.t92rg5fl` do not exist. No matching release-readiness/acceptance/theme directory found in the checked temporary-directory roots. Screenshot, picker diagnostics and retained harness unavailable; no failed harness attempt repeated.
+
+- Fresh durable run: screenshot helper overload needed explicit CGImage type; capture then aborted with CGS_REQUIRE_INIT until NSApplication.shared initialized. Product unchanged.
+- Fresh durable run: immediate NSRunningApplication lookup raced process registration; bounded readiness retry corrected driver setup. Picker then failed text acceptance; canceled without registering assets.
+
+## Status
+**Bounded host checks finished; release NO-GO (2026-10-08)** — Recreated clean optimized arm64 app+DMG with unique identifier com.tagbasedassetmanager.releasecheck.r58bwlu7l and unchanged production CSP/window policy. Full first-run no-library UI, true Hide/unhide and AX-confirmed minimize/restore3/3; six screenshots inspected. Additional DMG disposable-install launch passed; mounted package/built/copy hashes match and DMG checksum VALID. Evidence retained durably at /Users/coffeemug/Programming/tag-based-asset-manager-release-evidence/release-20261008-58bwlu7l. Helper process-registration race corrected; capture helper CGS_REQUIRE_INIT crash corrected with NSApplication.shared. Native picker path text rejected, canceled, no library authorization bypass or Trash action. Four synthetic file hashes unchanged. Fresh frontend210/15 (6.20s), Rust88/1ignored (0.71s), build/fmt/strictClippy pass. Domain partial-failure tests are not native OS acceptance. Remaining gates: native folder/bulk/partial Trash/restore, historical intermittent blank, populated-library/background/sleep, Windows/Intel/OneDrive and Developer ID/notarization/stapling/Gatekeeper. Zero valid signing identities; only arm64 Rust target. No product source/config edits, real user data access, permissions, commits or push. Owned processes stopped and DMG detached; only primary worktree. Documentation updated with bounded results and manual gates.
+
+---
+
 # Task Plan: Cleanup and local main merge
 
 ## Goal
