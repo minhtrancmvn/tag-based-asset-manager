@@ -16,6 +16,7 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
   return {
     isDesktop: true,
     load: vi.fn().mockResolvedValue(registered), choose: vi.fn().mockResolvedValue(null),
+    setTheme: vi.fn(async (theme) => ({ ...registered, theme })),
     activate: vi.fn().mockResolvedValue(registered), remove: vi.fn().mockResolvedValue({ libraries: [], activeLibraryId: null }),
     scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId })), cancelScan: vi.fn().mockResolvedValue(true),
     editTags: vi.fn(async (_libraryId, _assetId, _revision, addTags) => ({ ...scanResult.assets[0], tags: addTags, metadataId: "new-uuid", metadataRevision: "rev2", metadataState: "valid" as const, status: "ready" as const })),
@@ -38,6 +39,113 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 afterEach(cleanup);
+
+describe("app theme preference", () => {
+  it("defaults legacy settings to workshop", async () => {
+    const api = client();
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.theme).toBe("workshop");
+  });
+  it("loads stored theme without an active library", async () => {
+    const api = client({ load: vi.fn().mockResolvedValue({ libraries: [], activeLibraryId: null, theme: "midnight" }) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.theme).toBe("midnight");
+    expect(api.scan).not.toHaveBeenCalled();
+  });
+  it("commits theme without rescanning or replacing catalog settings", async () => {
+    const setTheme = vi.fn().mockResolvedValue({ ...registered, theme: "coral" });
+    const searches = [{ id: "s1", libraryId: "root1", name: "Saved", filters: { query: "favorite", view: "all" as const, matchMode: "all" as const, kind: "all" as const } }];
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, savedSearches: searches }), setTheme });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    const rows = result.current.assets;
+    const library = result.current.library;
+    expect(result.current.setTheme).toBeTypeOf("function");
+    await act(async () => { expect(await result.current.setTheme("coral")).toBe(true); });
+    expect(setTheme).toHaveBeenCalledWith("coral");
+    expect(result.current.theme).toBe("coral");
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.library).toBe(library);
+    expect(result.current.savedSearches).toEqual(searches);
+    expect(api.scan).toHaveBeenCalledTimes(1);
+  });
+  it("saves theme without a library and holds other mutations while pending", async () => {
+    const pending = deferred<LibraryState>();
+    const setTheme = vi.fn(() => pending.promise);
+    const api = client({ load: vi.fn().mockResolvedValue({ libraries: [], activeLibraryId: null }), setTheme });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.setTheme).toBeTypeOf("function");
+    let saved!: Promise<boolean>;
+    act(() => { saved = result.current.setTheme("midnight"); });
+    expect(result.current.savingTheme).toBe(true);
+    expect(result.current.theme).toBe("workshop");
+    await act(async () => { expect(await result.current.setTheme("mint")).toBe(false); await result.current.chooseLibrary(); });
+    expect(setTheme).toHaveBeenCalledTimes(1);
+    expect(api.choose).not.toHaveBeenCalled();
+    await act(async () => { pending.resolve({ libraries: [], activeLibraryId: null, theme: "midnight" }); await saved; });
+    expect(result.current.theme).toBe("midnight");
+    expect(result.current.savingTheme).toBe(false);
+  });
+  it("preserves committed theme when persistence fails", async () => {
+    const failure = { message: "Settings write failed", path: null, details: "injected" };
+    const api = client({ setTheme: vi.fn().mockRejectedValue(failure) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.setTheme).toBeTypeOf("function");
+    await act(async () => { expect(await result.current.setTheme("coral")).toBe(false); });
+    expect(result.current.theme).toBe("workshop");
+    expect(result.current.error).toEqual(failure);
+    expect(result.current.savingTheme).toBe(false);
+  });
+  it("rejects theme responses that change active library", async () => {
+    const api = client({ setTheme: vi.fn().mockResolvedValue({ ...registered, activeLibraryId: null, theme: "mint" }) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.setTheme).toBeTypeOf("function");
+    await act(async () => { expect(await result.current.setTheme("mint")).toBe(false); });
+    expect(result.current.theme).toBe("workshop");
+    expect(result.current.library?.id).toBe("root1");
+    expect(result.current.error?.details).toContain("Theme response");
+  });
+  it("never invokes theme settings from browser or while loading", async () => {
+    const load = deferred<LibraryState>();
+    const api = client({ load: vi.fn(() => load.promise), setTheme: vi.fn() });
+    const { result, unmount } = renderHook(() => useLibrary(api));
+    expect(result.current.setTheme).toBeTypeOf("function");
+    await act(async () => { expect(await result.current.setTheme("mint")).toBe(false); });
+    expect(api.setTheme).not.toHaveBeenCalled();
+    unmount();
+    const browser = client({ isDesktop: false, setTheme: vi.fn() });
+    const hook = renderHook(() => useLibrary(browser));
+    await act(async () => { expect(await hook.result.current.setTheme("mint")).toBe(false); });
+    expect(browser.setTheme).not.toHaveBeenCalled();
+  });
+  it("blocks theme persistence while scan is pending", async () => {
+    const pending = deferred<ScanResult>();
+    const api = client({ scan: vi.fn(() => pending.promise), setTheme: vi.fn() });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.scanning).toBe(true);
+    await act(async () => { expect(await result.current.setTheme("mint")).toBe(false); });
+    expect(api.setTheme).not.toHaveBeenCalled();
+  });
+  it("ignores pending theme result after unmount", async () => {
+    const pending = deferred<LibraryState>();
+    const api = client({ setTheme: vi.fn(() => pending.promise) });
+    const { result, unmount } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.setTheme).toBeTypeOf("function");
+    let saved!: Promise<boolean>;
+    act(() => { saved = result.current.setTheme("coral"); });
+    unmount();
+    pending.resolve({ ...registered, theme: "coral" });
+    expect(await saved).toBe(false);
+    expect(result.current.theme).toBe("workshop");
+  });
+});
 
 describe("native library lifecycle", () => {
   it("does not invoke native filesystem from browser", async () => {

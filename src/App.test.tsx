@@ -23,6 +23,7 @@ const issue: ScanIssue = { message: "Could not read directory", path: "Private",
 
 const libraryState: LibraryState = { libraries: [library, secondLibrary], activeLibraryId: library.id };
 const actions = {
+  setTheme: vi.fn<(_: import("./themes").AppTheme) => Promise<boolean>>(),
   editTags: vi.fn<(_: Asset, __: string[], ___: string[]) => Promise<boolean>>(),
   bulkEditTags: vi.fn<(_: Asset[], __: string[], ___: string[]) => Promise<boolean>>(),
   saveSearch: vi.fn<(_: string, __: import("./types").SearchFilters, ___?: string) => Promise<boolean>>(),
@@ -61,6 +62,9 @@ function setLibraryResult(overrides: Partial<{
   recoveryBusy: boolean;
   validation: import("./types").ValidationReport | null;
   exportResult: import("./types").ExportResult | null;
+  theme: import("./themes").AppTheme;
+  savingTheme: boolean;
+  setTheme: (theme: import("./themes").AppTheme) => Promise<boolean>;
 }> = {}) {
   vi.mocked(useLibrary).mockReturnValue({
     state: libraryState,
@@ -95,6 +99,9 @@ function setLibraryResult(overrides: Partial<{
     reconnectAsset: actions.reconnectAsset,
     deleteAssets: actions.deleteAssets,
     previewAsset: actions.previewAsset,
+    theme: "workshop",
+    savingTheme: false,
+    setTheme: actions.setTheme,
     deleting: false,
     recoveryBusy: false,
     editingAssetId: null,
@@ -114,6 +121,60 @@ beforeEach(() => {
 });
 
 describe("scanned library UI", () => {
+  it("shows labeled theme selector in topbar, including with collapsed sidebar and no library", () => {
+    setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });
+    render(<App />);
+    const selector = screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" });
+    expect(selector.value).toBe("workshop");
+    expect(selector.disabled).toBe(false);
+    fireEvent.change(selector, { target: { value: "coral" } });
+    expect(actions.setTheme).toHaveBeenCalledWith("coral");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" }).disabled).toBe(false);
+  });
+
+  it("disables theme persistence in browser preview and while theme save is pending", () => {
+    setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [], isDesktop: false });
+    const { rerender } = render(<App />);
+    const selector = screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" });
+    expect(selector.disabled).toBe(true);
+    fireEvent.change(selector, { target: { value: "coral" } });
+    expect(actions.setTheme).toHaveBeenCalledTimes(1); // jsdom dispatches change on disabled controls; native blocks user interaction.
+
+    setLibraryResult({ savingTheme: true });
+    rerender(<App />);
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" }).disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Saving theme");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(true);
+  });
+
+  it("keeps folder, query, selection and applies committed theme tokens", () => {
+    const root: Asset = { id: "root", name: "Workshop", relativePath: ".", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "untagged" };
+    const folder: Asset = { ...assets[1], id: "folder", relativePath: "Models" };
+    const nested = { ...assets[0], id: "gear", relativePath: "Models/Gear.stl", tags: ["favorite"] };
+    setLibraryResult({ assets: [root, folder, nested] });
+    const { rerender } = render(<App />);
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
+    const search = screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" });
+    fireEvent.change(search, { target: { value: '"Gear"' } });
+    const row = assetRows()[0];
+    fireEvent.click(row);
+    expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).toContain("Models");
+    expect(search.value).toBe('"Gear"');
+    expect(row.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.change(screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" }), { target: { value: "ocean" } });
+    expect(actions.setTheme).toHaveBeenCalledWith("ocean");
+    setLibraryResult({ assets: [root, folder, nested], theme: "ocean" });
+    rerender(<App />);
+
+    expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).toContain("Models");
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe('"Gear"');
+    expect(assetRows()[0].getAttribute("aria-selected")).toBe("true");
+    expect(document.documentElement.dataset.theme).toBe("ocean");
+    expect(document.documentElement.style.getPropertyValue("--floor")).toBe("#eaf2f5");
+  });
+
   it("shows only immediate child files and folders, never recursive descendants at root", () => {
     const folder: Asset = { id: "folder", name: "Models", relativePath: "Models", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "untagged" };
     const nested: Asset = { ...assets[0], id: "nested", relativePath: "Models/Nested.stl", name: "Nested.stl" };
@@ -283,7 +344,8 @@ describe("scanned library UI", () => {
     render(<App />);
     const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
     expect(within(sidebar).getByRole("combobox", { name: "Active library" })).toBeTruthy();
-    expect(screen.getAllByText("Workshop")).toHaveLength(1);
+    expect(within(sidebar).getByRole("option", { name: "Workshop" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Color theme" })).toBeTruthy();
     expect(screen.getAllByText(library.rootPath)).toHaveLength(1);
     const summary = screen.getByLabelText("Library summary");
     expect(within(summary).getByText("ASSETS")).toBeTruthy();
@@ -325,9 +387,10 @@ describe("scanned library UI", () => {
   it("retains active library context when sidebar is collapsed", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-    expect(screen.getByText("Workshop")).toBeTruthy();
+    expect(screen.getByText("Workshop", { selector: ".collapsed-library-context" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Color theme" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
-    expect(screen.getAllByText("Workshop")).toHaveLength(1);
+    expect(within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("option", { name: "Workshop" })).toBeTruthy();
   });
   it("shows actionable first-run state without mock data", () => {
     setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });

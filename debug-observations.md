@@ -101,3 +101,7 @@ Observation gate for original bug NOT passed: original warning reproduced 0/3. N
 
 ## Evidence files
 `/tmp/native-ipc-evidence/events.jsonl`, `baseline-summary.json`, `reload-summary.json`, `native-controls.png`, baseline/app/build/test logs, `before-hashes.json`, `after-hashes.json`. Diagnostics only; no source symbols changed.
+
+## Temporary evidence cleanup (2026-10-07)
+
+Task-owned `/private/tmp/native-ipc-evidence` and `/private/tmp/large-scan-evidence` removed after ownership/type inventory: 74 regular files, 11,951,401 bytes, no symlinks or special files. Historical paths above no longer exist; recorded findings remain in this file and progress log. User-created manual library and archived worktree backups were not cleanup targets.

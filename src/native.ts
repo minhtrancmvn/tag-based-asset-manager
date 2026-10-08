@@ -1,9 +1,10 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppError, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState, PreviewResult, ScanProgress, ScanResult, SearchFilters, TrashResult, ValidationReport } from "./types";
+import type { AppError, AppTheme, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState, PreviewResult, ScanProgress, ScanResult, SearchFilters, TrashResult, ValidationReport } from "./types";
 
 export interface LibraryClient {
   isDesktop: boolean;
   load: () => Promise<LibraryState>;
+  setTheme: (theme: AppTheme) => Promise<LibraryState>;
   choose: () => Promise<LibraryState | null>;
   activate: (libraryId: string) => Promise<LibraryState>;
   remove: (libraryId: string) => Promise<LibraryState>;
@@ -36,6 +37,7 @@ export function toAppError(value: unknown): AppError {
 export const nativeClient: LibraryClient = {
   isDesktop: isTauri(),
   load: () => invoke<LibraryState>("library_state"),
+  setTheme: (theme) => invoke<LibraryState>("set_app_theme", { theme }),
   choose: () => invoke<LibraryState | null>("choose_library"),
   activate: (libraryId) => invoke<LibraryState>("activate_library", { libraryId }),
   remove: (libraryId) => invoke<LibraryState>("remove_library", { libraryId }),
