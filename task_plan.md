@@ -1,3 +1,37 @@
+# Task Plan: Release build ledger and product backlog review (2026-10-08)
+
+## Goal
+Push approved main, build and verify unsigned release artifacts, add requested REALEASE.md ledger, then recommend next backlog work without implementing features.
+
+## Phases
+- [x] Push main09fc921 normally and verify remote equality; create docs/release-build-ledger branch.
+- [x] Frontend211/15 (9.82s), Rust88/1ignored (0.78s), build/fmt/strictClippy passed; optimized macOS .app/DMG built1m14s with normal production config/no-sign. Not launched/published.
+- [x] Preserved requested DMG/app.zip/SHA256SUMS under release-build-6jm1apzo/artifacts; arm64/identifier/version/input hashes/DMG integrity verified. REALEASE.md written with exact checksums and limits; README linked.
+- [x] Backlog/source review recommends single-item notes editing; no implementation. Ledger links/sizes/checksums/diff verified. Windows exact-source run37788726148 SUCCESS; unsigned installer/log artifacts present, not executed or locally downloaded for this run.
+
+## GitHub draft release setup (approved)
+- [x] No prior releases/v0.1.0 tag; source09fc921 remote exists; three package hashes/local manifest/appZip integrity verified.
+- [x] Created authorized draft/prerelease v0.1.0 targeting exact09fc921; uploaded DMG/app.zip/WindowsNSIS/SHA256SUMS; unsigned/runtime gates in notes. Unpublished, no tag overwritten.
+- [x] Draft/target/four remote asset server digests verified. Hyphenated GitHub download names/checksum manifest aligned; ledger updated. Draft URL untagged-6499c74c18cbb4833e7b; source tag creation may wait publication.
+- [x] User approved documentation commit/branch push and main merge. Include release ledger/README/plan plus requested backlog/notes; no feature implementation. Merge through reviewed documentation PR; no public draft publication.
+- [x] Added THEME-REVAMP backlog: blended gradient palettes and selectable swatch-grid picker, accessibility/readability/persistence/compatibility criteria. Priority/design details undecided.
+
+## Decisions Made
+- User explicitly requested spelling REALEASE.md; preserve filename.
+- Version0.1.0 unchanged; build from source09fc921, ledger-only uncommitted docs do not alter executable sources.
+- User explicitly authorizes GitHub draft/prerelease storage now; public publication still not authorized. Signing/notarization remain deferred. Draft source target exact build09fc921, not ledger docs commit.
+- Production app not launched to avoid real settings. Preserve active user-expanded test app/settings and recoverable backups.
+- Return to product backlog review after verification; no new feature implementation.
+
+## Errors Encountered
+- gh release list JSON url field unsupported; reran with supported fields, verified no existing releases.
+- GitHub normalized spaces in uploaded names; renamed assets to standard hyphenated names and replaced draft checksum manifest to match exact download names. Reverified all four remote digests.
+
+## Status
+Authorized unpublished GitHub draft/prerelease v0.1.0 created and four assets verified; ledger/backlog review complete. Requested artifacts preserved; no redundant app copies/new cloud fixtures, production app not launched. Windows exact-source run37788726148 passed tests/build/fmt/clippy/unsignedNSIS; artifacts present, ledger updated with exact run boundary. User approved documentation branch commit/push/main merge; five docs now include ledger and newly requested gradient-theme backlog. No public release publication authorized. Notes editing remains recommendation; theme revamp explicitly requested, relative priority not decided. Commit/PR/merge validation next.
+
+---
+
 # Task Plan: Conflict-copy acceptance record (2026-10-08)
 
 ## Goal
