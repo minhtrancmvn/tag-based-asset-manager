@@ -1,3 +1,8 @@
+# Product backlog update (2026-10-08)
+
+- User requests theme revamp following supplied blended gradient styles and replacing native name-list selector with gradient-swatch selection grid. Recorded as THEME-REVAMP in [product backlog](docs/product-backlog.md); backlog only, no implementation or priority decision yet.
+- Preserve semantic contrast/accessibility, native app-local persistence and existing preset compatibility; do not reset catalog/session state or modify library metadata.
+
 # Theme settings (requested 2026-10-06, implementation started 2026-10-07)
 
 - Implement only after key functions/features are completed and verified.

@@ -123,5 +123,8 @@ MVP supports single/bulk sidecar tags, saved filters, native file integration an
 - [Metadata format and target design](docs/metadata-format.md)
 - [Manual test plan](docs/manual-test-plan.md)
 - [Milestone progress log](docs/progress-log.md)
+- [Release readiness](docs/release-readiness.md)
+- [Release build ledger](REALEASE.md)
+- [Product backlog](docs/product-backlog.md)
 
 Metadata document specifies current sidecar schema and future reconciliation limits. Progress log records actual verification rather than assuming all platforms tested.
