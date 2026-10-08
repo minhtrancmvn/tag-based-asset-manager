@@ -1,3 +1,31 @@
+# Task Plan: Windows export CI failure (2026-10-08)
+
+## Goal
+Diagnose run37753762418 at commit561d303; correct confirmed Windows traversal-test fixture without relaxing production export boundaries; verify Windows CI/installer artifacts and prepare evidence commit/local merge approval.
+
+## Phases
+- [x] Phase 1: Original Windows assertion failure and diagnostic Windows RED show verbatim join normalization; focused macOS controls3/3. Windows failure not rerun3/3; bounded deterministic diagnostic boundary explicit.
+- [x] Phase 2: Three candidates recorded; diagnostic isolated lost ParentDir before export.
+- [x] Phase 3: ParentDir precondition RED on Windows; GitNexus LOW impact before test-only edits.
+- [x] Phase 4: Raw OsString traversal construction; local88/1ignored and Windows76/1ignored GREEN,frontend211/build/fmt/clippy/unsignedNSIS pass. Production untouched.
+- [x] Phase 5: Final verified fixture/CI evidence recorded; redundant .debug-session removed after read/coverage check. Evidence documentation commit and local merge await approval; no blanket release readiness claimed.
+
+## Decisions Made
+- Retain feature branch ci/windows-release-checks; no main edits/merge/release.
+- No real libraries/settings, native-picker bypass, skipped tests or weakened assertions.
+- Prior workflow commit/push approval does not cover fix. Ask before committing/pushing.
+
+## Errors Encountered
+- Stale GitNexus index omitted native export test; refreshed. Analyzer rewrote AGENTS.md/CLAUDE.md and removed existing worktree rule; restored both exactly to HEAD.
+- Rust missing from shell PATH; explicit subprocess PATH corrected. RTK filtered stdout from compound commands; captured complete logs using Python subprocess.
+- rtk proxy rg unavailable (rg executable absent); bounded Python inspection used. Unquoted gh URL triggered zsh globbing; quoted subprocess argument corrected.
+- Windows runtime unavailable locally; no Wine/Windows Rust target. Existing workflow can test new code only after separate commit/push approval.
+
+## Status
+**Windows CI/build acceptance verified; manual platform/distribution gates remain** — Initial Windows run37753762418 failed export test; diagnostic commit0159c24/run37757152265 proved canonical verbatim PathBuf::join removed ParentDir before validator. Approved test-only commitd89f951 constructs raw traversal via OsString/native separator, retaining strict rejection and no-overwrite assertions; production export unchanged. GitNexus LOW/zero affected flows. Full macOS Rust88/1ignored/fmt/strictClippy pass. Windows run37758578777 SUCCESS: frontend211, Rust76/1ignored, build/fmt/strictClippy/unsignedNSIS pass; logs+installer downloaded, PE/checksum verified (2708064bytes; SHA-2566af1774686219524f0a19214de072a0775153b43f29ed0eab3358ee0e4d5d77c). No installer executed; native Windows deferred, macOS notarization deferred until Developer account, Intel hardware/OneDrive/manual partial failure and historical blank cause unverified. Documentation finalized and obsolete session file removed; propose evidence commit then local CI branch merge, both awaiting user approval. No release publication.
+
+---
+
 # Task Plan: Release-readiness checks (2026-10-08)
 
 ## Goal
