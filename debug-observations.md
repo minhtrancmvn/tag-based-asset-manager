@@ -1,3 +1,31 @@
+# Windows export CI observations (2026-10-08)
+
+## Confirmed fixture diagnosis
+Diagnostic commit0159c24, Windows run37757152265 failed ParentDir precondition: root=`\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\.tmpopj4Ol\\library`, destination=`\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\.tmpopj4Ol\\escape.json`. `root.join("../escape.json")` normalized traversal away before validator invocation. Original loop therefore supplied legitimate sibling JSON destination; no production export safety defect established. Windows RED test now confirms fixture error. Test-only fix builds PathBuf from raw OsString append with native separator, retaining ParentDir precondition and rejection/no-overwrite assertions. Local88/1ignored/fmt/strictClippy pass. Approved fix commitd89f951 pushed; Windows run37758578777 GREEN: frontend211, Rust76/1ignored,fmt,strictClippy and unsigned NSIS build pass. Installer downloaded/PE header checked and SHA-256 matches runner6af1774686219524f0a19214de072a0775153b43f29ed0eab3358ee0e4d5d77c. No installer executed/native UI pass claimed. Evidence windows-diagnostic-failure.log and windows-final-verification.json in durable Windows readiness directory. Historical gate notes below describe prediagnostic state, superseded by this verified result.
+
+## Bug
+Expected: Cancel writes nothing; existing/private/non-JSON/traversal backup destinations reject.
+Actual: Windows run 37753762418 at 561d3035d583c12e622290969ffe5b4f6cabea00 fails rejection-loop assertion at src-tauri/src/milestone5_tests.rs:449:9. Loop does not print failing member. Windows Rust summary: 75 passed, 1 failed, 1 ignored. Frontend tests/build/fmt passed; Clippy/NSIS not reached.
+Environment: CI windows-latest; local Darwin 27 arm64, Node 24.19.0, pnpm 12.4.2, Rust 1.99.0. Local installed targets aarch64-apple-darwin/x86_64-apple-darwin; no Wine. Native picker not opened; disposable test state only.
+Knowledge base: Existing large-catalog entry does not match export/Windows/path symptom. No applicable prior resolution.
+
+## Reproduction and gate
+Original CI failure observed once. Same focused test passes on macOS three fresh runs; full macOS Rust baseline 88 passed, 0 failed, 1 pre-existing ignored benchmark. Evidence: /var/folders/d3/47mnxs2x33q95gbms0193hxr0000gn/T/windows-export-observe-_xr3tltr/results.json and macos-*.log.
+Diagnostic Windows RED obtained in run37757152265: fixture lacks ParentDir before validator. Test-only correction GREEN in run37758578777. Windows failure was not repeated3/3; exact diagnostic precondition and subsequent full-suite pass establish this bounded fixture diagnosis. Approved commits0159c24/d89f951 pushed on CI branch; production validator unchanged. Windows manual UI/installer execution still deferred.
+
+## Evidence and candidate explanations (not confirmed Windows diagnosis)
+1. Most-supported candidate: fixture root is canonicalized; on Windows this is verbatim path. Rust 1.99.0 PathBuf append implementation explicitly removes . and .. when base is verbatim (library/std/src/path.rs:1369-1386). root.join("../escape.json") can therefore present valid already-normalized sibling JSON destination to picker closure, not traversal input. Test expectation then wrong; production validator should not be tightened to forbid native-selected sibling backups. Test with diagnostic identifying path plus ParentDir fixture precondition; construct intended raw input via OsString append, not PathBuf::join, only after Windows reproduction confirms.
+2. Metadata/private-name rejection mismatch: first three loop members exercise ignored(name). Less supported: code shared across platforms and names unchanged. Test each member with diagnostic assertion and verify no output files.
+3. Filesystem/canonical-parent/reparse behavior: root and destination canonicalized, Windows path representation handled by same_native_path. Could cause path acceptance/rejection difference. Less supported: Windows successful new backup/create-only/concurrent/publication tests passed. Test direct validator and trace canonical/selected parents on disposable paths; preserve no-overwrite boundary.
+
+## Impact and scope
+Refreshed stale GitNexus index. Test-symbol upstream impact LOW, direct callers 0, affected flows 0. Initial lookup UNKNOWN/not found was not treated as safe. Refresh rewrote AGENTS.md/CLAUDE.md, including removing existing worktree rule; restored both exactly from HEAD immediately. No instruction/config changes retained. Approved test-only fixture correction committed/pushed and Windows validated; one workflow and one test file are committed branch scope. Documentation notes still pending commit approval; no main merge/release.
+
+## Errors
+Rust initially absent from shell PATH; controlled subprocess environment corrected. RTK output filtering hid command stdout; Python subprocess capture retained complete test logs/exit codes. rtk proxy rg unavailable because rg executable absent; used Python for bounded file inspection. One unquoted gh API URL rejected by zsh globbing; quoted subprocess argument corrected. No user data modified.
+
+---
+
 # Optimized release WKWebView observations
 
 ## Symptoms and reproduction (immutable)

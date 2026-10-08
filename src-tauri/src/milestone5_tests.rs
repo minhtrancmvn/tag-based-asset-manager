@@ -439,14 +439,24 @@ fn export_cancel_writes_nothing_and_existing_destinations_are_never_overwritten(
     fs::write(&destination, b"ordinary asset").unwrap();
     assert!(export_with_picker(&state, "library", || Ok(Some(destination.clone()))).is_err());
     assert_eq!(fs::read(&destination).unwrap(), b"ordinary asset");
+    let mut traversal = root.as_os_str().to_os_string();
+    traversal.push(format!("{0}..{0}escape.json", std::path::MAIN_SEPARATOR));
+    let traversal = PathBuf::from(traversal);
+    assert!(
+        traversal
+            .components()
+            .any(|component| component == std::path::Component::ParentDir),
+        "traversal fixture lost ParentDir: root={root:?}, destination={traversal:?}"
+    );
     for path in [
         root.join(manifest::MANIFEST_NAME),
         root.join(".asset-tags-conflict.json"),
         root.join(".asset-tags.tmp-export.json"),
         root.join("not-json.stl"),
-        root.join("../escape.json"),
+        traversal,
     ] {
-        assert!(export_with_picker(&state, "library", || Ok(Some(path))).is_err());
+        let result = export_with_picker(&state, "library", || Ok(Some(path.clone())));
+        assert!(result.is_err(), "unexpected export success: {path:?}");
     }
     assert!(export_with_picker(&state, "unknown", || panic!(
         "unknown library must reject before picker"
