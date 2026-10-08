@@ -2,15 +2,16 @@
 
 Tracks built artifacts, not release approval. Filename `REALEASE.md` is retained as requested. Add newest build first; preserve prior entries and tie every checksum to one exact build/source commit. Do not reuse a checksum for a rebuilt artifact, another platform or a signed package.
 
-For open release gates, see [release readiness](docs/release-readiness.md). Unsigned test/build artifacts are not signed distribution releases. An authorized [GitHub draft prerelease v0.1.0](https://github.com/minhtrancmvn/tag-based-asset-manager/releases/tag/untagged-6499c74c18cbb4833e7b) holds these assets; it remains unpublished and is not a public distribution release.
+For open release gates, see [release readiness](docs/release-readiness.md). User-approved [GitHub unsigned prerelease v0.1.0](https://github.com/minhtrancmvn/tag-based-asset-manager/releases/tag/v0.1.0) was published on **2026-10-08 at 15:27:50 UTC**. These are public preview downloads, not a stable or signed distribution release; remaining runtime/signing gates are not waived.
 
 ## GitHub release storage
 
 - Keep binaries out of Git history; generated `src-tauri/target/` stays ignored.
 - Attach packages and `SHA256SUMS.txt` to versioned GitHub Releases; preserve exact source target and immutable build hashes in this ledger.
-- Current draft/prerelease `v0.1.0` targets build source `09fc921e4e11a7ab5a8a586e45720f856e1a1f1c`; GitHub may defer creating Git tag until draft publication. No existing tag was moved or overwritten.
+- Published prerelease `v0.1.0` targets build source `09fc921e4e11a7ab5a8a586e45720f856e1a1f1c`. Publication created the lightweight Git tag at that exact commit; no existing tag was moved or overwritten. Release remains a prerelease and publication explicitly used `make_latest: false`.
 - GitHub download names use hyphens rather than spaces: `Tag-Based-Asset-Manager_0.1.0_aarch64.dmg`, `Tag-Based-Asset-Manager_0.1.0_arm64.app.zip`, `Tag-Based-Asset-Manager_0.1.0_x64-setup.exe`. Uploaded checksum manifest uses those exact names; local manifest uses local names. Package bytes/hashes are identical.
-- All four remote assets are uploaded and server SHA-256 digests match local files. Publishing requires separate explicit approval; unsigned/deferred acceptance limits remain in draft notes.
+- All four remote asset IDs, names, sizes and SHA-256 digests were unchanged by publication; package/server digests match preserved local files. Release notes retain unsigned/deferred acceptance warnings. Stable release approval remains separate.
+- Publication evidence: `release-build-6jm1apzo/publication-before.json`, `publication-request.json`, `publication-after.json`, `publication-tag.json` and `published-release-notes.md` under the local evidence root. Later isolated native checks are documented in [release readiness](docs/release-readiness.md); they do not change these package hashes or establish production-installer acceptance.
 
 ## Build 2026-10-08 — 0.1.0 — Windows x64
 
@@ -24,7 +25,7 @@ For open release gates, see [release readiness](docs/release-readiness.md). Unsi
 | SHA-256 | `db9373f1a164dba8f9e2072c012e6b1b287ae5f0182af0b3830846e80e8cd492` |
 | Verification | Downloaded artifact has valid PE header; SHA-256 matches runner checksum and preserved copy |
 | Tests | Frontend **211 passed**, Rust **76 passed / 1 pre-existing ignored benchmark**; type/build/fmt/strict Clippy passed |
-| Signing/publication | Unsigned NSIS installer; attached to unpublished GitHub draft/prerelease v0.1.0 |
+| Signing/publication | Unsigned NSIS installer; published in user-approved GitHub prerelease v0.1.0, not stable/latest |
 | Runtime | Installer not executed; Windows native install/uninstall/WebView2/picker/Recycle Bin acceptance remains deferred |
 
 Preserved in same `release-build-6jm1apzo/artifacts/` directory as macOS artifacts, with shared `SHA256SUMS.txt`. Downloaded logs and `windows-build-result.json` remain in parent build evidence directory. Duplicate downloaded executable removed after verified copy. This checksum is specific to run37788726148, not earlier Windows CI artifacts.
@@ -40,7 +41,7 @@ Preserved in same `release-build-6jm1apzo/artifacts/` directory as macOS artifac
 | Command | `pnpm tauri build --bundles app,dmg --no-sign --ci -- --locked` |
 | Result | PASS: optimized executable, `.app`, DMG and archived `.app.zip` |
 | Signing/notarization | No Developer ID signing; `--no-sign`; linker ad hoc signature may exist. Not notarized or stapled. |
-| Distribution status | Unsigned build attached to authorized GitHub draft. Public distribution remains NO-GO; no draft publication approved. |
+| Distribution status | Published in user-approved unsigned GitHub prerelease v0.1.0. Stable/signed distribution remains NO-GO. |
 | Runtime acceptance | This production-identifier build was not launched; avoids real app-data access. Earlier isolated native acceptance is separate evidence. |
 | Build inputs | Package/config/Cargo/frontend lockfile hashes unchanged during build. Ledger/task-plan edits do not alter executable sources. |
 
