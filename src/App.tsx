@@ -16,6 +16,8 @@ import { BulkTagDialog } from "./components/BulkTagDialog";
 import { SavedSearchDialog } from "./components/SavedSearchDialog";
 import { DeleteAssetsDialog } from "./components/DeleteAssetsDialog";
 import { AssetPreview } from "./components/AssetPreview";
+import { ThemeSettings } from "./components/ThemeSettings";
+import { themeCssVariables } from "./themes";
 import "./App.css";
 
 // Match fixed catalog row/header heights in App.css.
@@ -50,6 +52,7 @@ function App() {
     bulkEditTags, bulkEditing, savedSearches, savingSearch, saveSearch, deleteSearch,
     performAction, actionBusy, validateMetadata, validation, exportMetadata, exportResult,
     getReconnectTargets, reconnectAsset, recoveryBusy, deleteAssets, deleting, previewAsset,
+    theme, savingTheme, setTheme,
   } = useLibrary();
   const [view, setView] = useState<ViewKey>("all");
   const [query, setQuery] = useState("");
@@ -80,7 +83,7 @@ function App() {
   latestAssets.current = assets;
   latestLibraryId.current = state.activeLibraryId;
   const [deleteTargets, setDeleteTargets] = useState<Asset[] | null>(null);
-  const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || actionBusy || recoveryBusy || deleting);
+  const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || savingTheme || actionBusy || recoveryBusy || deleting);
 
   useEffect(() => {
     setView("all");
@@ -392,6 +395,23 @@ function App() {
     </th>
   );
 
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const previousTheme = root.dataset.theme;
+    const variables = themeCssVariables(theme);
+    const previousValues = new Map(Object.keys(variables).map((name) => [name, root.style.getPropertyValue(name)]));
+    root.dataset.theme = theme;
+    for (const [name, value] of Object.entries(variables)) root.style.setProperty(name, value);
+    return () => {
+      if (previousTheme === undefined) delete root.dataset.theme;
+      else root.dataset.theme = previousTheme;
+      for (const [name, value] of previousValues) {
+        if (value) root.style.setProperty(name, value);
+        else root.style.removeProperty(name);
+      }
+    };
+  }, [theme]);
+
   const noLibrary = !library;
   const hasLibraryChildren = directChildren.length > 0;
   const isEmptyLibrary = Boolean(library) && !hasLibraryChildren && !scanning && !scanStopped && !error;
@@ -454,7 +474,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           {!sidebarOpen && <span className="collapsed-library-context" title={library?.rootPath}>{library?.name ?? "No library selected"}</span>}
-          <div className="topbar-right"><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span><button type="button" className="avatar-button" title="Local app; no account needed" aria-label="Local app; no account needed">TA</button></div>
+          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={(next) => { void setTheme(next); }} /><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span><button type="button" className="avatar-button" title="Local app; no account needed" aria-label="Local app; no account needed">TA</button></div>
         </header>
 
         <div className="page-content">

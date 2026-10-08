@@ -16,6 +16,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             backend::library_state,
+            backend::set_app_theme,
             backend::choose_library,
             backend::activate_library,
             backend::remove_library,

@@ -37,6 +37,12 @@ describe("native DTO bridge", () => {
       ["library_state"], ["choose_library"], ["activate_library", { libraryId: "root1" }], ["remove_library", { libraryId: "root1" }],
     ]);
   });
+  it("persists app theme without any library or filesystem path", async () => {
+    expect(nativeClient.setTheme).toBeTypeOf("function");
+    mocks.invoke.mockResolvedValueOnce({ libraries: [], activeLibraryId: null, theme: "midnight" });
+    expect(await nativeClient.setTheme("midnight")).toEqual({ libraries: [], activeLibraryId: null, theme: "midnight" });
+    expect(mocks.invoke.mock.calls).toEqual([["set_app_theme", { theme: "midnight" }]]);
+  });
   it("passes typed progress channel with request ID", async () => {
     const progress = vi.fn();
     await nativeClient.scan("root1", "scan1", progress);

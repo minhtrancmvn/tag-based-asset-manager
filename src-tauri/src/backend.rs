@@ -82,6 +82,20 @@ pub struct LibrarySummary {
     pub last_scan_at: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AppTheme {
+    #[default]
+    Workshop,
+    Coral,
+    Lavender,
+    Ocean,
+    Mint,
+    Sunset,
+    Stone,
+    Midnight,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryState {
@@ -89,6 +103,8 @@ pub struct LibraryState {
     pub active_library_id: Option<String>,
     #[serde(default)]
     pub saved_searches: Vec<SavedSearch>,
+    #[serde(default)]
+    pub theme: AppTheme,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -199,6 +215,8 @@ struct PersistedSettings {
     active_library_id: Option<String>,
     #[serde(default)]
     saved_searches: Vec<SavedSearch>,
+    #[serde(default)]
+    theme: AppTheme,
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
 }
@@ -212,6 +230,7 @@ struct Inner {
     libraries: Vec<LibrarySummary>,
     active_library_id: Option<String>,
     saved_searches: Vec<SavedSearch>,
+    theme: AppTheme,
     settings_extra: BTreeMap<String, serde_json::Value>,
     startup_issue: Option<AppError>,
     scan_snapshots: HashMap<String, EditSnapshot>,
@@ -249,6 +268,7 @@ impl BackendState {
         let mut libraries = Vec::new();
         let mut active_library_id = None;
         let mut saved_searches = Vec::new();
+        let mut theme = AppTheme::default();
         let mut settings_extra = BTreeMap::new();
         let mut startup_issue = None;
         if let Some(parent) = settings_path.parent() {
@@ -280,6 +300,7 @@ impl BackendState {
                     libraries = settings.libraries;
                     active_library_id = settings.active_library_id;
                     saved_searches = settings.saved_searches;
+                    theme = settings.theme;
                     settings_extra = settings.extra;
                 }
                 Ok(_) => {
@@ -312,6 +333,7 @@ impl BackendState {
                 libraries,
                 active_library_id,
                 saved_searches,
+                theme,
                 settings_extra,
                 startup_issue,
                 scan_snapshots: HashMap::new(),
@@ -332,6 +354,7 @@ impl BackendState {
             libraries: inner.libraries.clone(),
             active_library_id: inner.active_library_id.clone(),
             saved_searches: inner.saved_searches.clone(),
+            theme: inner.theme,
         })
     }
 
@@ -346,6 +369,7 @@ impl BackendState {
         let previous_libraries = inner.libraries.clone();
         let previous_active = inner.active_library_id.clone();
         let previous_searches = inner.saved_searches.clone();
+        let previous_theme = inner.theme;
         let previous_extra = inner.settings_extra.clone();
         let value = match f(&mut inner) {
             Ok(value) => value,
@@ -353,6 +377,7 @@ impl BackendState {
                 inner.libraries = previous_libraries;
                 inner.active_library_id = previous_active;
                 inner.saved_searches = previous_searches;
+                inner.theme = previous_theme;
                 inner.settings_extra = previous_extra;
                 return Err(AppError::from(error));
             }
@@ -361,6 +386,7 @@ impl BackendState {
             inner.libraries = previous_libraries;
             inner.active_library_id = previous_active;
             inner.saved_searches = previous_searches;
+            inner.theme = previous_theme;
             inner.settings_extra = previous_extra;
             return Err(AppError::save(&inner.settings_path, error));
         }
@@ -382,6 +408,7 @@ fn persist(inner: &Inner) -> Result<(), String> {
         libraries: inner.libraries.clone(),
         active_library_id: inner.active_library_id.clone(),
         saved_searches: inner.saved_searches.clone(),
+        theme: inner.theme,
         extra: inner.settings_extra.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
@@ -460,6 +487,21 @@ pub fn library_state(state: State<'_, BackendState>) -> CommandResult<LibrarySta
 }
 
 #[tauri::command]
+pub fn set_app_theme(
+    theme: AppTheme,
+    state: State<'_, BackendState>,
+) -> CommandResult<LibraryState> {
+    set_app_theme_domain(&state, theme)
+}
+
+fn set_app_theme_domain(state: &BackendState, theme: AppTheme) -> CommandResult<LibraryState> {
+    state.mutate(|inner| {
+        inner.theme = theme;
+        Ok(search_state(inner))
+    })
+}
+
+#[tauri::command]
 pub async fn choose_library(
     app: tauri::AppHandle,
     state: State<'_, BackendState>,
@@ -504,6 +546,7 @@ pub async fn choose_library(
                 libraries: inner.libraries.clone(),
                 active_library_id: inner.active_library_id.clone(),
                 saved_searches: inner.saved_searches.clone(),
+                theme: inner.theme,
             })
         })
         .map(Some)
@@ -527,6 +570,7 @@ pub fn activate_library(
             libraries: inner.libraries.clone(),
             active_library_id: inner.active_library_id.clone(),
             saved_searches: inner.saved_searches.clone(),
+            theme: inner.theme,
         })
     })
 }
@@ -552,6 +596,7 @@ fn remove_library_domain(state: &BackendState, library_id: &str) -> CommandResul
             libraries: inner.libraries.clone(),
             active_library_id: inner.active_library_id.clone(),
             saved_searches: inner.saved_searches.clone(),
+            theme: inner.theme,
         })
     })
 }
@@ -561,6 +606,7 @@ fn search_state(inner: &Inner) -> LibraryState {
         libraries: inner.libraries.clone(),
         active_library_id: inner.active_library_id.clone(),
         saved_searches: inner.saved_searches.clone(),
+        theme: inner.theme,
     }
 }
 
@@ -2034,6 +2080,10 @@ fn system_time_string(time: SystemTime) -> Option<String> {
     let dt: DateTime<Utc> = time.into();
     Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
 }
+
+#[cfg(test)]
+#[path = "theme_tests.rs"]
+mod theme_tests;
 
 #[cfg(test)]
 #[path = "milestone4_tests.rs"]

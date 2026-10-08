@@ -1,10 +1,10 @@
-# Backlog: Theme settings (requested 2026-10-06)
+# Theme settings (requested 2026-10-06, implementation started 2026-10-07)
 
 - Implement only after key functions/features are completed and verified.
 - Add app theme settings with palette presets inspired by attached 4×5 gradient color grid: coral/magenta, blue/lavender, navy/teal, mint/aqua, warm orange/pink, muted pastel gray, and dark burgundy/indigo variants.
 - Keep dense catalog readable; apply palette through consistent UI tokens, with contrast checks for text, selection, errors and disabled controls. Do not turn each table row into a saturated gradient.
 - Persist chosen theme in app-local settings, not library metadata; preserve existing library roots and saved searches.
-- No theme implementation in current controls/cancellation/trash/preview task.
+- Separate feature branch `feat/app-theme-settings`: eight explicit presets (Workshop default, Coral, Lavender, Ocean, Mint, Sunset, Stone, Midnight); no automatic OS-mode switching. Native settings command `set_app_theme` returns committed state, preserving roots/searches/unknown fields and rolling back on failure. Theme changes must not rescan or reset browsing/selection.
 
 # Notes: Milestone 5 contract
 

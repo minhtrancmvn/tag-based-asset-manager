@@ -120,6 +120,20 @@ Native debug reconnect UI was exercised on synthetic assets on 2026-10-07: eligi
 
 Apple Silicon macOS debug WKWebView acceptance on 2026-10-07 verified prefix grouping/exact filtering/folder scope, Stop and recovery, bounded native text/PNG previews, single-file Trash Cancel/Confirm, actual OS Trash contents, exact-path restore and metadata recovery. Separate app-data and synthetic assets were used; see [progress log](progress-log.md). Optimized bundled release checks subsequently confirmed/fixed raster image CSP; complete release control matrix passed only with scratch disabled background throttling. Follow-up default-throttling optimized app passed 15-second opaque-window occlusion/reactivation checks3/3, with previews/filtering/Rescan intact. True Hide/minimize, sleep/wake and long-background recovery remain unverified. This does not cover Finder Put Back UI, folder/bulk/partial Trash platform flows, native picker UI or signed/distribution builds. Remaining cases still require native execution on disposable assets; browser mocked-hook smoke does not prove system Trash or native file reads.
 
+## Theme settings acceptance
+
+| ID | Action | Expected result |
+|---|---|---|
+| THEME-01 | First launch or legacy settings without `theme` | Workshop selected; no library required; existing settings not rewritten during load |
+| THEME-02 | Select each preset in top-bar Color theme selector | Sidebar accents and neutral catalog surfaces update; Midnight darkens table, inspector, inputs, menus and dialogs; labels, focus and selected rows remain readable |
+| THEME-03 | Change theme with selected row, active query and nested folder | Filter, selection, current folder and catalog stay intact; no extra scan |
+| THEME-04 | Restart and switch/remove disposable library registrations | Stored theme remains; roots, saved searches and unrelated settings preserved; no sidecar/asset changes |
+| THEME-05 | Simulate settings persistence failure using disposable app-data only | Visible error; previous theme remains selected and applied; no false saved state |
+| THEME-06 | Collapse sidebar or launch without libraries; inspect browser-only mode | Desktop selector remains available in top bar; browser selector disabled, no native settings invoked |
+| THEME-07 | Scan or native operation pending | Theme selector disabled; no concurrent preference writes |
+
+These cases require native execution for persistence claims. Palette/unit UI assertions and browser smoke alone do not prove native save/restart.
+
 ## Spaces, Unicode and OneDrive
 
 | ID | Scenario | Expected result |

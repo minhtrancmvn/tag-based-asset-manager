@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LibraryClient } from "./native";
 import { nativeClient, toAppError } from "./native";
-import type { AppError, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, ScanIssue, SearchFilters, ValidationReport } from "./types";
+import type { AppError, AppTheme, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, ScanIssue, SearchFilters, ValidationReport } from "./types";
 
 const emptyState: LibraryState = { libraries: [], activeLibraryId: null };
 
@@ -17,6 +17,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [bulkEditing, setBulkEditing] = useState(false);
   const [savingSearch, setSavingSearch] = useState(false);
+  const [savingTheme, setSavingTheme] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -238,6 +239,27 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       if (mounted.current) setSavingSearch(false);
     }
   }, [client]);
+  const setTheme = useCallback(async (theme: AppTheme): Promise<boolean> => {
+    if (!client.isDesktop || loading || operation.current || scanBusy.current) return false;
+    operation.current = true;
+    setSavingTheme(true);
+    setError(null);
+    try {
+      const next = await client.setTheme(theme);
+      if (!mounted.current) return false;
+      if (next.activeLibraryId !== stateRef.current.activeLibraryId || next.theme !== theme) throw new Error("Theme response did not match the requested settings.");
+      const updated = { ...stateRef.current, theme: next.theme };
+      stateRef.current = updated;
+      setState(updated);
+      return true;
+    } catch (failure) {
+      if (mounted.current) setError(toAppError(failure));
+      return false;
+    } finally {
+      operation.current = false;
+      if (mounted.current) setSavingTheme(false);
+    }
+  }, [client, loading]);
   const saveSearch = useCallback((name: string, filters: SearchFilters, searchId?: string) => mutateSearch((libraryId) => client.saveSearch(libraryId, name, filters, searchId ?? null)), [client, mutateSearch]);
   const deleteSearch = useCallback((searchId: string) => mutateSearch((libraryId) => client.deleteSearch(libraryId, searchId)), [client, mutateSearch]);
   const runNativeOperation = useCallback(async <T,>(action: (libraryId: string) => Promise<T>, onResult: (result: T, libraryId: string) => boolean, recovery = false): Promise<boolean> => {
@@ -335,11 +357,11 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const dismissError = useCallback(() => setError(null), []);
 
   return {
-    state, library: state.libraries.find((library) => library.id === state.activeLibraryId) ?? null,
+    state, theme: state.theme ?? "workshop", library: state.libraries.find((library) => library.id === state.activeLibraryId) ?? null,
     assets, issues, loading, scanning, scanStopped, progress, error, cancelScan,
     chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId,
     bulkEditTags, bulkEditing, savedSearches: (state.savedSearches ?? []).filter((search) => search.libraryId === state.activeLibraryId),
-    savingSearch, saveSearch, deleteSearch, performAction, actionBusy,
+    savingSearch, saveSearch, deleteSearch, savingTheme, setTheme, performAction, actionBusy,
     validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, recoveryBusy,
     deleteAssets, deleting, previewAsset,
     dismissError, isDesktop: client.isDesktop,

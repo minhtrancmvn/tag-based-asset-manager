@@ -53,10 +53,13 @@ export interface BulkTagResult {
   error: AppError | null;
 }
 
+export type AppTheme = "workshop" | "coral" | "lavender" | "ocean" | "mint" | "sunset" | "stone" | "midnight";
+
 export interface LibraryState {
   libraries: LibrarySummary[];
   activeLibraryId: string | null;
   savedSearches?: SavedSearch[];
+  theme?: AppTheme;
 }
 
 export interface AppError {

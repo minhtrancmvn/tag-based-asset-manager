@@ -96,6 +96,10 @@ After durable reconnect, fresh scan refreshes rows. If refresh fails, report com
 
 Backup publication uses flushed same-directory private temporary file and create-only hardlink publication, so existing destination cannot be replaced by a race. Requires hardlink-capable destination filesystem; unsupported filesystems return error without overwrite fallback. No backup upload. Native-selected parent canonicalized/revalidated; symlink/reparse destinations rejected. Existing filesystem race limitations still apply.
 
+## Theme preference in local settings
+
+Settings version 1 accepts `theme`: `workshop|coral|lavender|ocean|mint|sunset|stone|midnight`. Missing field defaults to `workshop` without rewriting legacy files during load. Invalid values block settings mutations and preserve original bytes. `set_app_theme` accepts only the theme enum, persists through the shared atomic settings path, and returns committed `LibraryState`; failed closure or persistence rolls back the theme. Library roots, saved searches and unknown settings fields remain intact. Theme never belongs in `.asset-tags.json` or metadata backups.
+
 ## Saved searches in local settings
 
 Settings version 1 adds optional `savedSearches` (default empty for prior installations), without moving canonical asset metadata. Each search has app UUID, `libraryId`, nonempty name and filters `{query, view, matchMode, kind}`. `view` is `all|untagged|attention`, `matchMode` is `all|any`, `kind` is `all|file|folder`. Query text retained exactly; parser applies case-insensitive semantics when loaded. Names unique case-insensitively within each library. Explicit update/rename/delete persists app-data atomically; failed settings writes roll back in-memory preferences/roots. Library removal deletes associated app-local searches only, never sidecars.

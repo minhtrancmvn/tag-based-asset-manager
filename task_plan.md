@@ -513,6 +513,44 @@ Deliver runnable Tauri v2 + React + TypeScript + Vite + Tailwind desktop scaffol
 ## Status
 **Milestone 1 verified within stated boundary** - 32 frontend tests, production frontend build, Rust formatting/clippy/test-profile build (0 native unit tests), native dev launch/window, and optimized host release executable passed. Browser UI smoke/screenshots verified separately. Native WKWebView interaction, Windows/Intel packaging and cloud sync remain unverified. Milestones 2–5 pending; no user files accessed.
 
+---
+
+# Task Plan: App theme settings
+
+## Goal
+Add app-local theme selection with accessible palette presets while preserving library roots, saved searches, dense catalog readability, and existing metadata behavior.
+
+## Phases
+- [x] Phase 1: Inspect settings persistence, UI token architecture, theme backlog, and symbol impact
+- [x] Phase 2: Define theme DTO/default/migration and palette token behavior; add regression tests
+- [x] Phase 3: Implement native settings persistence and theme selection UI on a feature branch
+- [x] Phase 4: Verify frontend/Rust suites, build, contrast/readability, and app-local settings preservation — eight presets passed; bounded foreground restart clean3/3 + instrumented3/3; historical intermittent blank remains unresolved release risk
+
+## Key Questions
+1. How should app theme preference coexist with existing roots and saved searches during settings mutation/migration?
+2. Which palette tokens can vary without reducing dense table readability or accessible state contrast?
+3. How should system appearance and stored user selection interact?
+4. Does the native acceptance executable load instrumented development UI or bundled production assets?
+
+## Decisions Made
+- Preserve existing app-local library roots and saved searches; never write theme preference to library sidecars.
+- Keep rows and table surfaces restrained; use palette tokens, not saturated row gradients.
+- Implement only after impact analysis and feature-branch creation; no commit/push unless requested.
+
+## Errors Encountered
+- None.
+
+## Status
+**Implemented; bounded host acceptance verified; historical blank remains unexplained** — branch `feat/app-theme-settings`. App-local enum/persistence and eight presets (Workshop default, Coral, Lavender, Ocean, Mint, Sunset, Stone, Midnight); explicit selection, including no-library desktop state. Theme save requires desktop, serializes with other native mutations, applies only committed response, and preserves scan/catalog/folder/filter/selection; rollback/error path covered. Rust `LibraryState`, backward settings default, strict enum, atomic persistence rollback and Tauri command wired. Nine Rust theme tests cover all presets round-trip, invalid values/original bytes, closure/write rollback, roots/searches/unknown fields/scan authorization, search/removal state. Frontend tests cover defaults/load, command DTO, busy/failure/unmount, selector, browser disabled, theme/folder/query/selection and document-root tokens.
+
+Validation: **209 frontend tests / 15 files**, `pnpm build`, **88 Rust tests passed, 1 ignored**, `cargo fmt --check`, strict all-target Clippy and `git diff --check` passed. Palette contrast tests enforce 4.5:1 for key text pairs and 3:1 focus/accent contrast; selections and disabled states have semantic tokens. Isolated native app built/launched with unique identifier and synthetic root/search/settings; baseline screenshot captured/inspected. Native instrumentation observer never became ready; enqueue returned HTTP 403 despite scratch-only CORS/CSP fixes. Therefore actual preset click/apply/restart persistence and per-preset rendered screenshots **not verified**. Native command/persistence behavior is Rust-tested but no UI IPC acceptance claim. Screen recording preflight passed; only app-owned native window captured. User library/settings untouched; synthetic settings and scratch evidence preserved. No commits or pushes.
+
+Native retry 2026-10-08: actual bundled WKWebView passed all eight presets via native Rust IPC, selected-row/query preservation, theme-only settings changes, asset hash preservation; Midnight screenshot confirms sidebar stripe removal. Restart retained Midnight/root/search/unknown fields on disk, but instrumented and clean uninstrumented copied bundles rendered blank white after restart. UI restart remains blocked; no fabricated rendering success. Test runtime stopped; default native debug executable restored by normal cargo build (20.77s). Frontend210/15/build, Rust88/1ignored/fmt/strictClippy passed. Evidence and synthetic app-data preserved. Independent review zero confirmed findings. No commit/push.
+
+Foreground restart investigation 2026-10-08: same clean archived bundle renders Midnight/full synthetic catalog/search3/3; instrumented bundle native DOM/tokens restored3/3, zero JS/error/CSP events. Blank symptom0/6, historical blank screenshots genuine but not explained or fixed. Settings only auto-scan timestamp changes; asset hashes preserved. Parent independently parsed result JSON invariants and inspected restart-3 screenshot. No production edit justified; bounded foreground acceptance passes, historical intermittent blank retained as release risk. Apps/receiver stopped; no builds/permissions/user-data/commit/push during investigation.
+
+Impact warnings relayed before edits: Rust `load`, `mutate`, `persist` CRITICAL; other indexed native state helpers LOW. GitNexus detect_changes: 39 symbols, 42 affected, 17 files, CRITICAL summary due shared persistence/scan flows; regression suites pass. Errors: initial inline test client caused repeated effect, fixed stable instance; pre-UI App tests expected only one “Workshop” string, assertions scoped; native Observer harness CORS/CSP/403 blocked UI interaction. No commits/pushes.
+
 # Task Plan: Repository CLAUDE.md Initialization
 
 ## Goal
