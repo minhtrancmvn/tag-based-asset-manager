@@ -742,6 +742,26 @@ describe("scanned library UI", () => {
     expect(confirm).toHaveBeenCalledWith([expect.objectContaining({ id: "asset-1" })]);
   });
 
+  it("labels inspector delete as single-item when multiple rows are selected", async () => {
+    const targets: Asset[] = [{ ...assets[0], name: "First.stl", relativePath: "First.stl", status: "ready" }, { ...assets[0], id: "asset-2", name: "Second.stl", relativePath: "Second.stl", status: "ready" }];
+    actions.deleteAssets.mockResolvedValue(true);
+    setLibraryResult({ assets: targets });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(assetRows()[1], { metaKey: true });
+    const inspector = screen.getByRole("complementary", { name: "Asset details" });
+    const deleteItem = within(inspector).getByRole("button", { name: "Delete this item" });
+    expect(deleteItem.getAttribute("title")).toBe("Move this item to Trash / Recycle Bin");
+    expect(screen.getByRole("button", { name: "Delete selected" })).toBeTruthy();
+    fireEvent.click(deleteItem);
+    const dialog = await screen.findByRole("dialog", { name: `Delete ${targets[1].name}` });
+    expect(within(dialog).queryByText(targets[0].relativePath)).toBeNull();
+    expect(actions.deleteAssets).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete item" }));
+    expect(actions.deleteAssets).toHaveBeenCalledExactlyOnceWith([targets[1]]);
+  });
+
   it("offers bulk delete for the exact selection and keeps the folder row protected", () => {
     const root: Asset = { id: "path:.", name: "Workshop", relativePath: ".", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "ready", metadataRevision: "rev-root" };
     setLibraryResult({ assets: [root, { ...assets[0], status: "ready" }] });
