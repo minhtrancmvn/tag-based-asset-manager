@@ -1,3 +1,26 @@
+# Task Plan: Conflict-copy acceptance record (2026-10-08)
+
+## Goal
+Record bounded synthetic conflict-copy scan/validation pass and completed cleanup without closing real conflict/sync gates.
+
+## Phases
+- [x] Inspect final local evidence: three original hashes unchanged, manual scan/validation confirmation, cloud target empty.
+- [x] Updated release checklist/progress log with exact synthetic/manual/independent boundaries and retained real-conflict gates.
+- [x] Evidence JSON, links and diff validated; three-file documentation scope ready for approval. Test root absent on latest check, not recreated.
+
+## Decisions Made
+- docs/onedrive-conflict-acceptance branch; no source edits, commit/push/merge or new fixtures.
+- Synthetic conflict detection is not actual OneDrive conflict generation or cross-device proof.
+- Standing cleanup complete; preserve evidence/backups/user-expanded settings.
+
+## Errors Encountered
+- Final empty-root check raised FileNotFoundError: approved cloud test root now absent. Cleanup record showed empty root at removal time; parent still exists. Recorded state/cause unknown; no recreation or other cloud inspection.
+
+## Status
+Documentation complete: bounded manual/screenshot/conflict hash evidence recorded, real sync/placeholder gates open. Main8cd35bf Windows CI passed; three documentation files pending approval. Test files cleaned; approved root currently absent. No commit/push/merge or release.
+
+---
+
 # Task Plan: Consolidated release checklist (2026-10-08)
 
 ## Goal
