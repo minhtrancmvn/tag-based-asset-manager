@@ -1,10 +1,10 @@
 # Product backlog
 
-Items below are planned work, not implemented behavior. Release acceptance gates stay in [release readiness](release-readiness.md); build artifacts stay in [REALEASE.md](../REALEASE.md).
+Items below track feature status and planned work; each item states whether it is implemented or remains proposed. Release acceptance gates stay in [release readiness](release-readiness.md); build artifacts stay in [REALEASE.md](../REALEASE.md).
 
 ## THEME-REVAMP — Gradient palettes and swatch-grid picker
 
-**Status:** Requested by user on 2026-10-08; backlog only. Priority relative to other features not decided.
+**Status:** Implemented and locally validated on 2026-10-09; user authorized PR-based preparation and publication of unsigned prerelease v0.2.0. Automated checks and isolated macOS native acceptance passed for feature source. Windows native UI, exact Tab focus handoff and signed distribution remain open; no stable/all-platform acceptance implied.
 
 ### User request
 
@@ -26,13 +26,15 @@ Reference is a four-row, five-column set of rounded gradient tiles: vivid coral/
 - Theme changes preserve current folder, filters, selection, sort/layout and catalog; no rescan or asset/sidecar writes.
 - Existing stored preset IDs remain valid or receive an explicitly tested backward-compatible migration. Do not silently break legacy settings.
 
-### Design decisions still needed
+### Resolved design decisions
 
-Palette count/names, which gradients become full themes, light/dark variants, gradient placement, grid dimensions and backward-compatible preset mapping. Resolve in feature design before implementation; no arbitrary new configuration or automatic OS appearance mode implied.
+Approved on 2026-10-09: twenty full themes (all original eight visually redesigned plus twelve new IDs), fourteen light and six dark treatments, responsive five-by-four toolbar popover. Existing IDs and Workshop default retained. Palette/primary-gradient contrast tests and isolated macOS native acceptance passed. Older eight-theme builds cannot read new IDs; downgrade requires selecting an original ID or restoring compatible settings backup.
 
-### Verification when implemented
+### Verification status and remaining acceptance
 
-Component/keyboard accessibility tests, native persistence/rollback tests, palette contrast checks and actual native screenshots for selected/focused/pending/error states. Verify Windows and macOS picker behavior; replacing native select must not reduce keyboard accessibility.
+Frontend full suite: **248 tests / 15 files** pass; typecheck/production build pass. Rust: **88 pass / 1 ignored**; fmt/strict Clippy pass. Palette tests cover twenty themes, semantic text/focus states and sampled primary/sidebar gradients. Signature gradients drive primary actions; disabled primary actions revert to readable solid disabled colors. Sidebar/search disabled text remains on existing parent surface.
+
+Isolated macOS native matrix report records commits for all twenty themes; native settings record final `aurora` and per-theme results report catalog/settings/asset/sidecar preservation. At minimum 820×600 all twenty swatches fit. Validation report records Right Arrow focus-only, Return commit and Escape trigger-focus restoration; the archived task plan remains stale/unchecked despite later results, and raw keyboard snapshots do not independently establish each event. A later Tab event dismissed the popover, but exact focus destination was not captured. Synthetic library/app-data only; Windows native UI/installer acceptance remains unavailable/unverified. These are isolated-source checks, not v0.2.0 package acceptance; fresh release builds and CI are pending. Older eight-theme builds cannot load new IDs; downgrade requires original preset or compatible settings backup. No v0.2.0 pull request, package or release has been published yet.
 
 ## NOTES-EDIT — Single-item notes editor
 
