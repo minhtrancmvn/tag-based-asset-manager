@@ -1,3 +1,30 @@
+# Task Plan: Published prerelease and native-gate records (2026-10-08)
+
+## Goal
+Update release ledger/readiness/progress with verified prerelease publication and bounded native checks, preserving unresolved gates and historical records.
+
+## Phases
+- [x] Phase 1: Verified live release draft false/prerelease true, exact tag/source and all four asset digests; read retained native verification, settings recovery and cleanup JSON.
+- [x] Phase 2: Updated REALEASE.md, docs/release-readiness.md and docs/progress-log.md; preserved historical entries and explicit acceptance limits.
+- [x] Phase 3: Live publication/tag/digests and native evidence checked; independent factual review found no inaccuracies. Eleven local links and diff whitespace validation passed; exact four documentation files changed. No commit/push.
+
+## Decisions Made
+- User approved release-record updates, then said proceed to documentation commit/PR. Commit exact four reviewed docs, push branch and open PR targeting main. No main merge, release change or theme implementation authorized.
+- Branch docs/prerelease-native-gates; no source or runtime behavior changes.
+- Published unsigned prerelease is not stable/signed release readiness.
+- Collision acceptance is exact new synthetic macOS destination, not retroactive proof for earlier manual file.
+- Downgrade pass covers isolated source/settings reversal and exact settings-backup recovery, not saved-search mutation or versioned installer downgrade.
+- Blank-window cause remains unresolved despite three healthy native sessions.
+- Gradient-theme design remains recommended next task after records; no palette choice or feature approval inferred.
+
+## Errors Encountered
+- None.
+
+## Status
+Documentation complete and verified on docs/prerelease-native-gates. Four modified files: REALEASE.md, docs/release-readiness.md, docs/progress-log.md and task_plan.md. Live release/tag/four digests, native pass boundaries and cleanup records verified; independent review found no inaccuracies, eleven local links and diff check passed. No code changes, tests rerun, commit/push/merge or theme design/implementation. Historical plans below retain state at time written, not current publication authorization. User subsequently approved documentation commit/PR; scope/branch/sensitive-file checks passed. Next: staged GitNexus check, commit exact docs, push branch and create PR; no main merge or theme design/implementation.
+
+---
+
 # Task Plan: Release build ledger and product backlog review (2026-10-08)
 
 ## Goal
