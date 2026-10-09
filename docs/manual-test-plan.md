@@ -134,6 +134,20 @@ Apple Silicon macOS debug WKWebView acceptance on 2026-10-07 verified prefix gro
 
 These cases require native execution for persistence claims. Palette/unit UI assertions and browser smoke alone do not prove native save/restart.
 
+## Gradient theme picker acceptance
+
+| ID | Action | Expected result |
+|---|---|---|
+| THEME-GRID-01 | Open theme picker at minimum supported 820×600 window and inspect all rows | Twenty named gradient swatches fit or scroll within the popover; selected state uses a check/outline as well as color; no page-level horizontal overflow |
+| THEME-GRID-02 | Move with Arrow keys, Home and End, then press Escape | Focus moves without saving; Escape dismisses and restores trigger focus; committed theme remains unchanged |
+| THEME-GRID-03 | Focus another swatch and press Return or Space | Theme applies only after native settings commit; selected marker/name/tokens update together; picker stays open for comparison |
+| THEME-GRID-04 | Press Tab from a swatch and inspect next focus target | Popover closes without trapping focus; verify and record the exact destination control on each supported platform |
+| THEME-GRID-05 | Commit each preset, restart, and inspect theme plus synthetic library state | All 20 IDs persist; catalog/folder/query/selection/layout and asset/sidecar bytes remain unchanged; no rescan is initiated by theme selection |
+| THEME-GRID-06 | Attempt a theme change with isolated settings persistence failure | Previous committed theme stays applied; accessible error appears; failed choice can be retried |
+| THEME-GRID-07 | Resize window or zoom with picker open; inspect menus/dialogs and semantic states | Popover remains viewport-clamped and readable; portals inherit theme tokens; focus, selection, disabled and error/success states remain distinguishable |
+
+**Completed bounded macOS evidence (2026-10-09):** Isolated Apple Silicon build and synthetic library/app-data only. All 20 swatches fit at 820×600; keyboard Right Arrow moved focus without saving, Return committed, Escape dismissed and restored trigger focus. Native settings show all-theme commits and restart restored final Aurora selection; synthetic library/settings and asset/sidecar bytes were preserved. Tab dismissed the popover, but exact destination focus was not captured. Windows native UI remains unverified; see [release readiness](release-readiness.md). These results are not v0.2.0 package acceptance.
+
 ## Spaces, Unicode and OneDrive
 
 | ID | Scenario | Expected result |
