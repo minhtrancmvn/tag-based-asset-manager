@@ -42,6 +42,23 @@ Isolated macOS native matrix report records commits for all twenty themes; nativ
 
 Current inspector displays notes read-only. Small next-feature candidate: edit one valid existing metadata entry with explicit Save/Cancel, native ID/revision checks and atomic owning-sidecar writes. Preserve UUID, tags, unknown fields, stale entries and browsing state; retain draft on failure. Define empty versus omitted notes/no-op semantics before implementation. Missing/blocked entries remain read-only. No bulk notes, import, rename or moves in this scope.
 
+## MODEL-PREVIEW — 3MF preview and Space shortcut
+
+**Status:** User-requested backlog addition on 2026-10-11; proposed, not implemented or approved for inclusion in v0.2.0.
+
+### User request
+
+Allow previews of `.3mf` files. Press Space on a selected catalog file to preview on macOS, and on Windows when Peek is installed.
+
+### Proposed acceptance criteria
+
+- A valid, locally available `.3mf` file has a real model preview rather than the current unsupported-format message. Define whether preview uses an in-app renderer, an embedded thumbnail or a native preview provider during design; do not assume macOS Quick Look or Windows Peek supports 3MF without verification.
+- With catalog focus and one existing file selected, Space opens its preview on macOS. On Windows, support the same interaction when Peek is installed and usable; investigate its supported invocation mechanism and file-type support before choosing an integration.
+- Space continues normal behavior in text inputs, tag editing, dialogs, theme swatches and other controls. Preview dismissal restores catalog focus without changing selection, filters or browsing state.
+- Missing/blocked files, unsupported or malformed models, unavailable native providers and Windows without Peek produce a clear unavailable/error state; do not silently open an editor, install software or modify file associations.
+- Preview stays read-only, resolves approved library/asset IDs in Rust and preserves asset/sidecar bytes. Any 3MF archive parsing needs explicit compressed/uncompressed size and model-complexity limits, traversal checks and no embedded script execution or network fetches.
+- Verify macOS and Windows-with-Peek behavior separately, including dismissal, provider failures and 3MF support. No native-preview compatibility claimed before actual platform testing.
+
 ## Broader deferred capabilities
 
 - Metadata backup import: requires explicit overwrite/conflict/recovery design.
