@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLibrary } from "./useLibrary";
 import type { LibraryClient } from "./native";
-import type { LibraryState, ScanProgress, ScanResult } from "./types";
+import type { AppTheme, LibraryState, ScanProgress, ScanResult } from "./types";
 
 const registered: LibraryState = {
   libraries: [{ id: "root1", name: "Library", rootPath: "/selected/library", assetCount: 0, lastScanAt: null }],
@@ -54,6 +54,65 @@ describe("app theme preference", () => {
     expect(result.current.theme).toBe("midnight");
     expect(api.scan).not.toHaveBeenCalled();
   });
+  it("loads stored Aurora without an active library", async () => {
+    const api = client({ load: vi.fn().mockResolvedValue({ libraries: [], activeLibraryId: null, theme: "aurora" }) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.theme).toBe("aurora");
+    expect(api.scan).not.toHaveBeenCalled();
+  });
+  it("commits Aurora while preserving catalog and unknown library state", async () => {
+    const aurora: AppTheme = "aurora";
+    const searches = [{ id: "s1", libraryId: "root1", name: "Saved", filters: { query: "favorite", view: "all" as const, matchMode: "all" as const, kind: "all" as const } }];
+    const extension = { source: "future-settings" };
+    const initialState = { ...registered, savedSearches: searches, extension };
+    const api = client({
+      load: vi.fn().mockResolvedValue(initialState),
+      setTheme: vi.fn().mockResolvedValue({ ...registered, theme: aurora }),
+    });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    const rows = result.current.assets;
+    const library = result.current.library;
+
+    await act(async () => { expect(await result.current.setTheme(aurora)).toBe(true); });
+
+    expect(api.setTheme).toHaveBeenCalledOnce();
+    expect(api.setTheme).toHaveBeenCalledWith(aurora);
+    expect(result.current.theme).toBe(aurora);
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.library).toBe(library);
+    expect(result.current.savedSearches).toEqual(searches);
+    expect(result.current.state).toMatchObject({ extension });
+    expect(api.scan).toHaveBeenCalledTimes(1);
+    expect(api.choose).not.toHaveBeenCalled();
+    expect(api.activate).not.toHaveBeenCalled();
+    expect(api.remove).not.toHaveBeenCalled();
+    expect(api.editTags).not.toHaveBeenCalled();
+    expect(api.bulkEditTags).not.toHaveBeenCalled();
+    expect(api.deleteAssets).not.toHaveBeenCalled();
+    expect(api.exportMetadata).not.toHaveBeenCalled();
+  });
+  it("rejects Aurora neutrally while a different native action owns operation lock", async () => {
+    const aurora: AppTheme = "aurora";
+    const pending = deferred<void>();
+    const api = client({ setTheme: vi.fn(), performAction: vi.fn(() => pending.promise) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    let action!: Promise<boolean>;
+    act(() => { action = result.current.performAction(result.current.assets[0], "open"); });
+    expect(result.current.actionBusy).toBe(true);
+
+    await act(async () => {
+      expect(await result.current.setTheme(aurora)).toBe(false);
+    });
+
+    expect(result.current.theme).toBe("workshop");
+    expect(result.current.error).toBeNull();
+    expect(api.setTheme).not.toHaveBeenCalled();
+    await act(async () => { pending.resolve(); await action; });
+    expect(result.current.actionBusy).toBe(false);
+  });
   it("commits theme without rescanning or replacing catalog settings", async () => {
     const setTheme = vi.fn().mockResolvedValue({ ...registered, theme: "coral" });
     const searches = [{ id: "s1", libraryId: "root1", name: "Saved", filters: { query: "favorite", view: "all" as const, matchMode: "all" as const, kind: "all" as const } }];
@@ -87,6 +146,19 @@ describe("app theme preference", () => {
     expect(api.choose).not.toHaveBeenCalled();
     await act(async () => { pending.resolve({ libraries: [], activeLibraryId: null, theme: "midnight" }); await saved; });
     expect(result.current.theme).toBe("midnight");
+    expect(result.current.savingTheme).toBe(false);
+  });
+  it("preserves committed theme when Aurora persistence fails", async () => {
+    const aurora: AppTheme = "aurora";
+    const failure = { message: "Settings write failed", path: null, details: "injected" };
+    const api = client({ setTheme: vi.fn().mockRejectedValue(failure) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => { expect(await result.current.setTheme(aurora)).toBe(false); });
+
+    expect(result.current.theme).toBe("workshop");
+    expect(result.current.error).toEqual(failure);
     expect(result.current.savingTheme).toBe(false);
   });
   it("preserves committed theme when persistence fails", async () => {

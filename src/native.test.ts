@@ -43,6 +43,13 @@ describe("native DTO bridge", () => {
     expect(await nativeClient.setTheme("midnight")).toEqual({ libraries: [], activeLibraryId: null, theme: "midnight" });
     expect(mocks.invoke.mock.calls).toEqual([["set_app_theme", { theme: "midnight" }]]);
   });
+  it("round-trips Aurora exactly without library ID or filesystem path", async () => {
+    const aurora: import("./types").AppTheme = "aurora";
+    const committed = { libraries: [], activeLibraryId: null, theme: aurora };
+    mocks.invoke.mockResolvedValueOnce(committed);
+    expect(await nativeClient.setTheme(aurora)).toBe(committed);
+    expect(mocks.invoke.mock.calls).toEqual([["set_app_theme", { theme: "aurora" }]]);
+  });
   it("passes typed progress channel with request ID", async () => {
     const progress = vi.fn();
     await nativeClient.scan("root1", "scan1", progress);

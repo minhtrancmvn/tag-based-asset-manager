@@ -94,6 +94,18 @@ pub enum AppTheme {
     Sunset,
     Stone,
     Midnight,
+    Rose,
+    Peach,
+    Ember,
+    Amber,
+    Meadow,
+    Lagoon,
+    Glacier,
+    Sky,
+    Cobalt,
+    Iris,
+    Plum,
+    Aurora,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
 import { useLibrary } from "./useLibrary";
 import type { Asset, LibraryState, LibrarySummary, ScanIssue } from "./types";
@@ -116,39 +116,57 @@ function assetRows() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  actions.setTheme.mockResolvedValue(true);
   actions.previewAsset.mockResolvedValue({ kind: "unsupported", content: null, mimeType: null, truncated: false, message: "No preview available." });
   setLibraryResult();
 });
 
 describe("scanned library UI", () => {
-  it("shows labeled theme selector in topbar, including with collapsed sidebar and no library", () => {
+  it("shows labeled theme picker in topbar, including with collapsed sidebar and no library", async () => {
     setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });
     render(<App />);
-    const selector = screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" });
-    expect(selector.value).toBe("workshop");
-    expect(selector.disabled).toBe(false);
-    fireEvent.change(selector, { target: { value: "coral" } });
+    const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "Color theme" });
+    expect(trigger.textContent).toContain("Workshop");
+    expect(trigger.disabled).toBe(false);
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Color theme choices" });
+    const group = within(dialog).getByRole("group", { name: "Color themes" });
+    expect(within(group).getAllByRole("button")).toHaveLength(20);
+    expect(within(group).getByRole("button", { name: "Workshop, light" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(group).getByRole("button", { name: "Coral, light" }));
     expect(actions.setTheme).toHaveBeenCalledWith("coral");
+    expect(trigger.textContent).toContain("Workshop");
+    expect(screen.getByRole("dialog", { name: "Color theme choices" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" }).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
   });
 
   it("disables theme persistence in browser preview and while theme save is pending", () => {
     setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [], isDesktop: false });
     const { rerender } = render(<App />);
-    const selector = screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" });
-    expect(selector.disabled).toBe(true);
-    fireEvent.change(selector, { target: { value: "coral" } });
-    expect(actions.setTheme).toHaveBeenCalledTimes(1); // jsdom dispatches change on disabled controls; native blocks user interaction.
+    const browserTrigger = screen.getByRole<HTMLButtonElement>("button", { name: "Color theme" });
+    expect(browserTrigger.getAttribute("aria-disabled")).toBe("true");
+    expect(browserTrigger.disabled).toBe(false);
+    expect(browserTrigger.title).toBe("Theme setting unavailable");
+    browserTrigger.focus();
+    expect(document.activeElement).toBe(browserTrigger);
+    fireEvent.click(browserTrigger);
+    expect(screen.queryByRole("dialog", { name: "Color theme choices" })).toBeNull();
+    expect(actions.setTheme).not.toHaveBeenCalled();
 
     setLibraryResult({ savingTheme: true });
     rerender(<App />);
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" }).disabled).toBe(true);
-    expect(screen.getByRole("status").textContent).toContain("Saving theme");
+    const savingTrigger = screen.getByRole<HTMLButtonElement>("button", { name: "Color theme" });
+    expect(savingTrigger.getAttribute("aria-disabled")).toBe("true");
+    expect(savingTrigger.disabled).toBe(false);
+    fireEvent.click(savingTrigger);
+    expect(screen.queryByRole("dialog", { name: "Color theme choices" })).toBeNull();
+    expect(actions.setTheme).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("Saving theme"))).toBe(true);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(true);
   });
 
-  it("keeps folder, query, selection and applies committed theme tokens", () => {
+  it("keeps folder, query, selection and applies committed theme tokens without unrelated actions", () => {
     const root: Asset = { id: "root", name: "Workshop", relativePath: ".", kind: "folder", extension: null, modifiedAt: null, sizeBytes: null, tags: [], status: "untagged" };
     const folder: Asset = { ...assets[1], id: "folder", relativePath: "Models" };
     const nested = { ...assets[0], id: "gear", relativePath: "Models/Gear.stl", tags: ["favorite"] };
@@ -163,16 +181,89 @@ describe("scanned library UI", () => {
     expect(search.value).toBe('"Gear"');
     expect(row.getAttribute("aria-selected")).toBe("true");
 
-    fireEvent.change(screen.getByRole<HTMLSelectElement>("combobox", { name: "Color theme" }), { target: { value: "ocean" } });
-    expect(actions.setTheme).toHaveBeenCalledWith("ocean");
-    setLibraryResult({ assets: [root, folder, nested], theme: "ocean" });
+    const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "Color theme" });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Color theme choices" });
+    const option = within(dialog).getByRole("button", { name: "Aurora, dark" });
+    fireEvent.click(option);
+    expect(actions.setTheme).toHaveBeenCalledWith("aurora");
+    expect(option.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("Saving Aurora"))).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(false);
+
+    setLibraryResult({ assets: [root, folder, nested], theme: "aurora", loading: false });
     rerender(<App />);
 
     expect(screen.getByRole("navigation", { name: "Folder path" }).textContent).toContain("Models");
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe('"Gear"');
     expect(assetRows()[0].getAttribute("aria-selected")).toBe("true");
-    expect(document.documentElement.dataset.theme).toBe("ocean");
-    expect(document.documentElement.style.getPropertyValue("--floor")).toBe("#eaf2f5");
+    expect(document.documentElement.dataset.theme).toBe("aurora");
+    expect(document.documentElement.style.getPropertyValue("--floor")).toBe("#172028");
+    expect(document.documentElement.style.getPropertyValue("--paper")).toBe("#1F2F36");
+    expect(document.documentElement.style.getPropertyValue("--theme-mode")).toBe("dark");
+    expect(dialog.parentElement).toBe(document.body);
+    expect(screen.getByRole("dialog", { name: "Color theme choices" })).toBe(dialog);
+    expect(actions.rescan).not.toHaveBeenCalled();
+    expect(actions.editTags).not.toHaveBeenCalled();
+    expect(actions.deleteAssets).not.toHaveBeenCalled();
+    expect(actions.exportMetadata).not.toHaveBeenCalled();
+  });
+
+  it("preserves popover focus through committed parent rerender", () => {
+    const { rerender } = render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Color theme" }));
+    const dialog = screen.getByRole("dialog", { name: "Color theme choices" });
+    const aurora = within(dialog).getByRole("button", { name: "Aurora, dark" });
+    aurora.focus();
+    fireEvent.click(aurora);
+    setLibraryResult({ theme: "aurora" });
+    rerender(<App />);
+    expect(screen.getByRole("dialog", { name: "Color theme choices" })).toBe(dialog);
+    expect(screen.getByRole("button", { name: "Aurora, dark" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Color theme" }).textContent).toContain("Aurora");
+    expect(document.activeElement).toBe(aurora);
+  });
+
+  it("prevents duplicate save while pending and makes same-current tile a no-op", async () => {
+    let resolve: ((result: boolean) => void) | undefined;
+    actions.setTheme.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Color theme" }));
+    const dialog = screen.getByRole("dialog", { name: "Color theme choices" });
+    const aurora = within(dialog).getByRole("button", { name: "Aurora, dark" });
+    fireEvent.click(aurora);
+    fireEvent.click(aurora);
+    expect(actions.setTheme).toHaveBeenCalledTimes(1);
+    expect(aurora.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Workshop, light" }));
+    expect(actions.setTheme).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolve?.(true);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("Saving Aurora")).toBeNull();
+  });
+
+  it("uses global theme persistence error only and keeps committed selection", async () => {
+    const failure = { message: "Theme setting could not be saved", path: null, details: null };
+    actions.setTheme.mockResolvedValueOnce(false);
+    setLibraryResult({ error: failure });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Color theme" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Color theme choices" })).getByRole("button", { name: "Aurora, dark" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(failure.message);
+    expect(within(screen.getByRole("dialog", { name: "Color theme choices" })).getByRole("button", { name: "Workshop, light" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByText(failure.message, { selector: ".dialog-error" })).toBeNull();
+  });
+
+  it("keeps picker enabled with no library and dismisses choices", () => {
+    setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Color theme" }));
+    expect(screen.getByRole("dialog", { name: "Color theme choices" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close theme choices" }));
+    expect(screen.queryByRole("dialog", { name: "Color theme choices" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Color theme" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("shows only immediate child files and folders, never recursive descendants at root", () => {
@@ -291,6 +382,38 @@ describe("scanned library UI", () => {
     expect(screen.getByText("Deep.stl", { selector: ".name-content span" })).toBeTruthy();
   });
 
+  it("preserves catalog session state across committed theme change", () => {
+    const catalog = syntheticAssets(500);
+    setLibraryResult({ assets: catalog });
+    const { rerender } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Untagged/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Asset kind" }), { target: { value: "file" } });
+    fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
+
+    const scroll = screen.getByRole("table").parentElement!;
+    fireEvent.scroll(scroll, { target: { scrollTop: 1200 } });
+    expect(scroll.scrollTop).toBe(1200);
+    expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
+    expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Color theme" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Color theme choices" })).getByRole("button", { name: "Aurora, dark" }));
+    expect(actions.setTheme).toHaveBeenCalledExactlyOnceWith("aurora");
+    setLibraryResult({ assets: catalog, theme: "aurora" });
+    rerender(<App />);
+
+    expect(screen.getByRole("heading", { name: "Untagged" })).toBeTruthy();
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Asset kind" }).value).toBe("file");
+    expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
+    expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
+    expect(scroll.scrollTop).toBe(1200);
+    expect(assetRows().length).toBeLessThan(80);
+  });
+
   it("keeps scrolled row visible after tag data refresh and resets for sort changes", () => {
     const catalog = syntheticAssets(500);
     setLibraryResult({ assets: catalog });
@@ -345,7 +468,7 @@ describe("scanned library UI", () => {
     const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
     expect(within(sidebar).getByRole("combobox", { name: "Active library" })).toBeTruthy();
     expect(within(sidebar).getByRole("option", { name: "Workshop" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Color theme" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
     expect(screen.getAllByText(library.rootPath)).toHaveLength(1);
     const summary = screen.getByLabelText("Library summary");
     expect(within(summary).getByText("ASSETS")).toBeTruthy();
@@ -388,7 +511,7 @@ describe("scanned library UI", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(screen.getByText("Workshop", { selector: ".collapsed-library-context" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Color theme" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
     expect(within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("option", { name: "Workshop" })).toBeTruthy();
   });

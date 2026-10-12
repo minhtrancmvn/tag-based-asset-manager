@@ -1,3 +1,6 @@
+import type { AppTheme } from "./themes";
+export type { AppTheme } from "./themes";
+
 export type AssetKind = "file" | "folder";
 export type AssetStatus = "ready" | "untagged" | "missing" | "warning";
 
@@ -52,8 +55,6 @@ export interface BulkTagResult {
   assets: Asset[];
   error: AppError | null;
 }
-
-export type AppTheme = "workshop" | "coral" | "lavender" | "ocean" | "mint" | "sunset" | "stone" | "midnight";
 
 export interface LibraryState {
   libraries: LibrarySummary[];

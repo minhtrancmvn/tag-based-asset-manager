@@ -28,7 +28,9 @@ fn every_theme_round_trips_through_settings_and_snapshot() {
     let path = dir.path().join("settings.json");
     let state = BackendState::load(path.clone()).unwrap();
     for name in [
-        "workshop", "coral", "lavender", "ocean", "mint", "sunset", "stone", "midnight",
+        "workshop", "coral", "lavender", "ocean", "mint", "sunset", "stone", "midnight", "rose",
+        "peach", "ember", "amber", "meadow", "lagoon", "glacier", "sky", "cobalt", "iris", "plum",
+        "aurora",
     ] {
         let theme: AppTheme = serde_json::from_value(serde_json::json!(name)).unwrap();
         let returned = set_app_theme_domain(&state, theme).unwrap();
@@ -247,6 +249,23 @@ fn theme_updates_preserve_roots_searches_extras_and_scan_authorization() {
             ("library".into(), "theme-scan".into()),
             cancellation.clone(),
         );
+    }
+    for name in [
+        "workshop", "coral", "lavender", "ocean", "mint", "sunset", "stone", "midnight", "rose",
+        "peach", "ember", "amber", "meadow", "lagoon", "glacier", "sky", "cobalt", "iris", "plum",
+        "aurora",
+    ] {
+        let theme: AppTheme = serde_json::from_value(serde_json::json!(name)).unwrap();
+        let returned = set_app_theme_domain(&state, theme).unwrap();
+        assert_eq!(returned.libraries, baseline.libraries);
+        assert_eq!(returned.active_library_id, baseline.active_library_id);
+        assert_eq!(returned.saved_searches, baseline.saved_searches);
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(persisted["custom"], initial["custom"]);
+        assert_eq!(persisted["theme"], name);
+        assert_eq!(fs::read(root.join("model.stl")).unwrap(), b"inert asset");
+        assert!(!root.join(manifest::MANIFEST_NAME).exists());
     }
     let returned = set_app_theme_domain(&state, AppTheme::Midnight).unwrap();
     assert_eq!(returned.libraries, baseline.libraries);

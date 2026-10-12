@@ -1,4 +1,4 @@
-export type AppTheme = "workshop" | "coral" | "lavender" | "ocean" | "mint" | "sunset" | "stone" | "midnight";
+export type AppTheme = "workshop" | "coral" | "lavender" | "ocean" | "mint" | "sunset" | "stone" | "midnight" | "rose" | "peach" | "ember" | "amber" | "meadow" | "lagoon" | "glacier" | "sky" | "cobalt" | "iris" | "plum" | "aurora";
 
 export interface ThemePalette {
   label: string;
@@ -35,6 +35,14 @@ export interface ThemePalette {
   gradient: string;
 }
 
+export interface ThemeAppearanceRecord {
+  mode: "light" | "dark";
+  swatchStops: readonly [string, string, string];
+  sidebarStops: readonly [string, string, string];
+  primaryStops: readonly [string, string, string];
+  primaryInk: string;
+}
+
 export const themeOptions: readonly { value: AppTheme; label: string }[] = [
   { value: "workshop", label: "Workshop" },
   { value: "coral", label: "Coral" },
@@ -44,21 +52,110 @@ export const themeOptions: readonly { value: AppTheme; label: string }[] = [
   { value: "sunset", label: "Sunset" },
   { value: "stone", label: "Stone" },
   { value: "midnight", label: "Midnight" },
+  { value: "rose", label: "Rose" },
+  { value: "peach", label: "Peach" },
+  { value: "ember", label: "Ember" },
+  { value: "amber", label: "Amber" },
+  { value: "meadow", label: "Meadow" },
+  { value: "lagoon", label: "Lagoon" },
+  { value: "glacier", label: "Glacier" },
+  { value: "sky", label: "Sky" },
+  { value: "cobalt", label: "Cobalt" },
+  { value: "iris", label: "Iris" },
+  { value: "plum", label: "Plum" },
+  { value: "aurora", label: "Aurora" },
 ];
 
 export const themePalettes: Record<AppTheme, ThemePalette> = {
-  workshop: { label: "Workshop", floor: "#f2efe8", paper: "#faf8f3", panel: "#fbfaf6", raised: "#fffefa", ink: "#233129", muted: "#59675d", line: "#d5d8ce", accent: "#4b6553", accentInk: "#ffffff", accentSoft: "#e7eee5", focus: "#94502f", sidebar: "#23372f", sidebarText: "#f4f4eb", sidebarMuted: "#c1d0c2", sidebarActive: "#405c4c", sidebarBorder: "#52675a", tableHeader: "#eeefe8", rowHover: "#f1f3ec", selection: "#dce8da", selectionInk: "#203326", tag: "#e9ece4", tagInk: "#435348", error: "#fff2eb", errorInk: "#773f30", errorLine: "#a94f36", success: "#edf4ea", successInk: "#35533a", input: "#fffefa", disabled: "#e8e9e3", disabledInk: "#51594f", gradient: "#eedfcb" },
-  coral: { label: "Coral", floor: "#f7eeeb", paper: "#fff9f6", panel: "#fffaf8", raised: "#fffefd", ink: "#392522", muted: "#68514d", line: "#e3d2cd", accent: "#9e493c", accentInk: "#ffffff", accentSoft: "#f5ded8", focus: "#84372e", sidebar: "#49302e", sidebarText: "#fff7f3", sidebarMuted: "#ead0ca", sidebarActive: "#70433e", sidebarBorder: "#79504a", tableHeader: "#f4e8e3", rowHover: "#f7ece8", selection: "#f1d8d1", selectionInk: "#3e2824", tag: "#f3e3de", tagInk: "#633d36", error: "#fff0eb", errorInk: "#782f24", errorLine: "#a6382c", success: "#eaf3e8", successInk: "#35533a", input: "#fffefd", disabled: "#eee8e5", disabledInk: "#544945", gradient: "#f2d9cf" },
-  lavender: { label: "Lavender", floor: "#f1eff7", paper: "#faf9ff", panel: "#fbfaff", raised: "#ffffff", ink: "#2e2a3d", muted: "#565166", line: "#d9d5e5", accent: "#62518e", accentInk: "#ffffff", accentSoft: "#e8e2f5", focus: "#504078", sidebar: "#302d43", sidebarText: "#f6f3ff", sidebarMuted: "#d1cce5", sidebarActive: "#4c4568", sidebarBorder: "#5c5675", tableHeader: "#eceaf3", rowHover: "#f1eff7", selection: "#e1dcf0", selectionInk: "#302943", tag: "#e8e4f2", tagInk: "#4c4267", error: "#fff0f0", errorInk: "#762d35", errorLine: "#a43f49", success: "#eaf3e8", successInk: "#35533a", input: "#ffffff", disabled: "#e9e7ed", disabledInk: "#504d58", gradient: "#e3def4" },
-  ocean: { label: "Ocean", floor: "#eaf2f5", paper: "#f7fbfd", panel: "#f8fbfd", raised: "#ffffff", ink: "#1e3039", muted: "#4c626c", line: "#cfdae0", accent: "#276377", accentInk: "#ffffff", accentSoft: "#dcecf1", focus: "#175168", sidebar: "#203943", sidebarText: "#f1f8fa", sidebarMuted: "#c4d9df", sidebarActive: "#315766", sidebarBorder: "#4d6a75", tableHeader: "#e6eff2", rowHover: "#edf5f7", selection: "#d4e8ee", selectionInk: "#213a43", tag: "#dcebf0", tagInk: "#315561", error: "#fff0ea", errorInk: "#752f22", errorLine: "#a43d2d", success: "#e9f3eb", successInk: "#2f5038", input: "#ffffff", disabled: "#e4eaec", disabledInk: "#48565a", gradient: "#cde2e9" },
-  mint: { label: "Mint", floor: "#edf4ef", paper: "#f9fcf9", panel: "#f9fcfa", raised: "#ffffff", ink: "#24342c", muted: "#52665a", line: "#d1ded5", accent: "#34684e", accentInk: "#ffffff", accentSoft: "#deeee2", focus: "#28563f", sidebar: "#263d32", sidebarText: "#f2f8f3", sidebarMuted: "#c8ddce", sidebarActive: "#3a5b49", sidebarBorder: "#587061", tableHeader: "#e8f0e9", rowHover: "#eff5ef", selection: "#d9e9dc", selectionInk: "#25392c", tag: "#e2eee4", tagInk: "#355541", error: "#fff0eb", errorInk: "#762f24", errorLine: "#a33e2e", success: "#e4f1e6", successInk: "#2e5137", input: "#ffffff", disabled: "#e7ece8", disabledInk: "#4d5850", gradient: "#d6e8da" },
-  sunset: { label: "Sunset", floor: "#f7f0e7", paper: "#fffaf2", panel: "#fcf8f0", raised: "#fffdf9", ink: "#382b21", muted: "#665447", line: "#e2d6c5", accent: "#92552b", accentInk: "#ffffff", accentSoft: "#f3e2c9", focus: "#75411e", sidebar: "#493728", sidebarText: "#fff8eb", sidebarMuted: "#e5d1b5", sidebarActive: "#6b5035", sidebarBorder: "#80664b", tableHeader: "#f1e8da", rowHover: "#f7efe3", selection: "#f0dfc6", selectionInk: "#382a1e", tag: "#f1e5d2", tagInk: "#624a31", error: "#fff0e9", errorInk: "#772f20", errorLine: "#a33a27", success: "#eaf2e7", successInk: "#355138", input: "#fffdf9", disabled: "#ede8df", disabledInk: "#524b42", gradient: "#f0dfc5" },
-  stone: { label: "Stone", floor: "#efefed", paper: "#fafaf8", panel: "#f9f9f7", raised: "#ffffff", ink: "#292d2b", muted: "#555d59", line: "#d5d8d5", accent: "#4a5a54", accentInk: "#ffffff", accentSoft: "#e2e8e4", focus: "#35473f", sidebar: "#303936", sidebarText: "#f4f6f4", sidebarMuted: "#cbd2ce", sidebarActive: "#48544f", sidebarBorder: "#626b66", tableHeader: "#e9ebe9", rowHover: "#f0f2f0", selection: "#dce3de", selectionInk: "#29332e", tag: "#e6e9e6", tagInk: "#424b46", error: "#fff0ed", errorInk: "#762f2c", errorLine: "#a33d39", success: "#e9f2e9", successInk: "#35523a", input: "#ffffff", disabled: "#e9ebea", disabledInk: "#505753", gradient: "#e0e2df" },
-  midnight: { label: "Midnight", floor: "#171d24", paper: "#202831", panel: "#222b34", raised: "#29343e", ink: "#edf2f5", muted: "#bac5cd", line: "#46535d", accent: "#71b6cc", accentInk: "#10232b", accentSoft: "#293f49", focus: "#91d7e8", sidebar: "#131a20", sidebarText: "#edf3f6", sidebarMuted: "#b8c7d0", sidebarActive: "#2b414d", sidebarBorder: "#43545e", tableHeader: "#2b353e", rowHover: "#2b3740", selection: "#344953", selectionInk: "#f1f7f9", tag: "#34434b", tagInk: "#dcebf0", error: "#402d2d", errorInk: "#ffd4c8", errorLine: "#e38b78", success: "#293b32", successInk: "#c4e5ca", input: "#1b242c", disabled: "#303a41", disabledInk: "#c0c9cd", gradient: "#2c414b" },
+  workshop: {
+    label: "Workshop", floor: "#EBEBE4", paper: "#FBFAF6", panel: "#F7F7F3", raised: "#FEFEFD", ink: "#2B2C27", muted: "#40413C", line: "#CFD2CE", accent: "#7D5034", accentInk: "#FFFFFF", accentSoft: "#ECE6DF", focus: "#7D5034", sidebar: "#1E6941", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#1E6A2B", sidebarBorder: "#64BD73", tableHeader: "#F0F2ED", rowHover: "#F7F7F1", selection: "#E2D8CF", selectionInk: "#2B2C27", tag: "#F1ECE2", tagInk: "#3D342A", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FDFDFD", disabled: "#DFE4E0", disabledInk: "#48534E", gradient: "#E9E1D1",
+  },
+  coral: {
+    label: "Coral", floor: "#F2ECE4", paper: "#FCFAF6", panel: "#FCF8F3", raised: "#FFFDFD", ink: "#2C2A27", muted: "#413F3C", line: "#D0D2CE", accent: "#873F38", accentInk: "#FFFFFF", accentSoft: "#EEE4DF", focus: "#873F38", sidebar: "#9E3B2C", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#A62F5A", sidebarBorder: "#BD6485", tableHeader: "#FBF2EE", rowHover: "#FBF6F0", selection: "#E5D5D0", selectionInk: "#2C2A27", tag: "#F8E5E8", tagInk: "#402F2B", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FFFDFD", disabled: "#E5E4E0", disabledInk: "#48534E", gradient: "#F4D4DC",
+  },
+  lavender: {
+    label: "Lavender", floor: "#EEECE8", paper: "#FBF9F7", panel: "#F9F7F6", raised: "#FDFEFF", ink: "#272B30", muted: "#3C4044", line: "#CFD2CF", accent: "#594681", accentInk: "#FFFFFF", accentSoft: "#E8E4E9", focus: "#594681", sidebar: "#542C9E", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#3147AD", sidebarBorder: "#6475BD", tableHeader: "#F5F2F5", rowHover: "#F9F2F2", selection: "#DBD5DF", selectionInk: "#272B30", tag: "#E9EBF3", tagInk: "#323142", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FEFDFE", disabled: "#E2E4E4", disabledInk: "#48534E", gradient: "#DAE0F0",
+  },
+  ocean: {
+    label: "Ocean", floor: "#EAEAE5", paper: "#F9FAF7", panel: "#F5F7F5", raised: "#FCFEFE", ink: "#202D2E", muted: "#364242", line: "#CED2CF", accent: "#225D70", accentInk: "#FFFFFF", accentSoft: "#DFE7E7", focus: "#225D70", sidebar: "#2B5E99", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#1F656F", sidebarBorder: "#64B2BD", tableHeader: "#EDF0F0", rowHover: "#EEF6F3", selection: "#CEDBDC", selectionInk: "#202D2E", tag: "#DEEDEB", tagInk: "#20383D", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FCFDFD", disabled: "#DEE3E1", disabledInk: "#48534E", gradient: "#C7E2E1",
+  },
+  mint: {
+    label: "Mint", floor: "#ECEEE5", paper: "#FBFAF5", panel: "#F8F9F3", raised: "#FDFEFE", ink: "#222E29", muted: "#38423D", line: "#CFD2CD", accent: "#326447", accentInk: "#FFFFFF", accentSoft: "#E3E8E0", focus: "#326447", sidebar: "#1E6947", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#1D6760", sidebarBorder: "#64BDB4", tableHeader: "#F1F6EF", rowHover: "#F7F7EC", selection: "#D3DCD2", selectionInk: "#222E29", tag: "#E4F2EC", tagInk: "#263A30", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FDFEFE", disabled: "#E0E6E2", disabledInk: "#48534E", gradient: "#D1EBE5",
+  },
+  sunset: {
+    label: "Sunset", floor: "#F2EBE3", paper: "#FCF9F5", panel: "#FCF6F2", raised: "#FFFDFD", ink: "#2C2B25", muted: "#41403A", line: "#D0D2CD", accent: "#854522", accentInk: "#FFFFFF", accentSoft: "#EEE3DC", focus: "#854522", sidebar: "#8C4C27", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#A62F55", sidebarBorder: "#BD6480", tableHeader: "#FBF1EA", rowHover: "#FBF3EB", selection: "#E4D5CB", selectionInk: "#2C2B25", tag: "#F8E4E5", tagInk: "#403124", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FFFDFD", disabled: "#E5E4DF", disabledInk: "#48534E", gradient: "#F4D2D8",
+  },
+  stone: {
+    label: "Stone", floor: "#EEECE5", paper: "#FBFAF7", panel: "#F9F8F5", raised: "#FEFEFE", ink: "#252C2A", muted: "#3A413F", line: "#CFD2CF", accent: "#48534D", accentInk: "#FFFFFF", accentSoft: "#E6E6E3", focus: "#48534D", sidebar: "#4A615B", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#70555A", sidebarBorder: "#BD9FA5", tableHeader: "#F4F3F0", rowHover: "#F9F8F4", selection: "#D7D9D5", selectionInk: "#252C2A", tag: "#F2ECEA", tagInk: "#2D3532", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FDFDFD", disabled: "#E1E4E1", disabledInk: "#48534E", gradient: "#EAE0DF",
+  },
+  midnight: {
+    label: "Midnight", floor: "#171E29", paper: "#222E38", panel: "#212E3A", raised: "#2B3643", ink: "#EEF2F4", muted: "#C6D0D7", line: "#515F6D", accent: "#8BCAD4", accentInk: "#111D29", accentSoft: "#384F58", focus: "#8BCAD4", sidebar: "#22437A", sidebarText: "#F1F4F6", sidebarMuted: "#C8D2D8", sidebarActive: "#2A278A", sidebarBorder: "#545199", tableHeader: "#212E3B", rowHover: "#243640", selection: "#2A3954", selectionInk: "#F4F6F7", tag: "#26424B", tagInk: "#E1EDF1", error: "#402A2D", errorInk: "#FFD3CC", errorLine: "#EA8B7D", success: "#263B32", successInk: "#C9EAD1", input: "#1A242E", disabled: "#333D44", disabledInk: "#C2CBD0", gradient: "#293852",
+  },
+  rose: {
+    label: "Rose", floor: "#F1EAE5", paper: "#FBF9F6", panel: "#FAF6F4", raised: "#FEFDFD", ink: "#2C2A2B", muted: "#413F3F", line: "#CFD2CE", accent: "#873F58", accentInk: "#FFFFFF", accentSoft: "#EDE3E3", focus: "#873F58", sidebar: "#9E2C58", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#A12D7B", sidebarBorder: "#BD649F", tableHeader: "#F8F0EF", rowHover: "#F7F0F0", selection: "#E4D4D6", selectionInk: "#2C2A2B", tag: "#F1E1E6", tagInk: "#402F35", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FEFDFD", disabled: "#E4E3E1", disabledInk: "#48534E", gradient: "#E9CDD9",
+  },
+  peach: {
+    label: "Peach", floor: "#F2EDE5", paper: "#FCFAF7", panel: "#FCF8F5", raised: "#FFFDFD", ink: "#2C2B28", muted: "#41403D", line: "#D0D2CF", accent: "#844A3A", accentInk: "#FFFFFF", accentSoft: "#EEE5E0", focus: "#844A3A", sidebar: "#99422B", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#A92F40", sidebarBorder: "#BD6470", tableHeader: "#FBF5F0", rowHover: "#FBF7F2", selection: "#E4D7D1", selectionInk: "#2C2B28", tag: "#FAEBE6", tagInk: "#3F322C", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FFFEFD", disabled: "#E5E6E1", disabledInk: "#48534E", gradient: "#F8DED8",
+  },
+  ember: {
+    label: "Ember", floor: "#1C1E27", paper: "#2E2D32", panel: "#302D32", raised: "#34343D", ink: "#EEF2F4", muted: "#C6D0D7", line: "#585E6A", accent: "#F1A07E", accentInk: "#1A1C24", accentSoft: "#59413C", focus: "#F1A07E", sidebar: "#7A2244", sidebarText: "#F1F4F6", sidebarMuted: "#C8D2D8", sidebarActive: "#8A272C", sidebarBorder: "#995155", tableHeader: "#322C33", rowHover: "#3F3332", selection: "#572F36", selectionInk: "#F4F6F7", tag: "#583B33", tagInk: "#E1EDF1", error: "#402A2D", errorInk: "#FFD3CC", errorLine: "#EA8B7D", success: "#263B32", successInk: "#C9EAD1", input: "#1C242C", disabled: "#333D44", disabledInk: "#C2CBD0", gradient: "#532F35",
+  },
+  amber: {
+    label: "Amber", floor: "#F1EDE2", paper: "#FCFAF5", panel: "#FBF8F1", raised: "#FEFDFC", ink: "#2A2C23", muted: "#3F4138", line: "#D0D2CD", accent: "#765218", accentInk: "#FFFFFF", accentSoft: "#ECE6DA", focus: "#765218", sidebar: "#735920", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#825124", sidebarBorder: "#BD8F64", tableHeader: "#FAF5EA", rowHover: "#FBF7EC", selection: "#E1D8C9", selectionInk: "#2A2C23", tag: "#F4EADC", tagInk: "#3B3421", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FFFEFD", disabled: "#E5E6DF", disabledInk: "#48534E", gradient: "#EDDDC8",
+  },
+  meadow: {
+    label: "Meadow", floor: "#ECECE3", paper: "#FBFAF6", panel: "#F8F8F3", raised: "#FEFEFD", ink: "#242E26", muted: "#3A423B", line: "#CFD2CE", accent: "#43602F", accentInk: "#FFFFFF", accentSoft: "#E5E8DE", focus: "#43602F", sidebar: "#1F6A1E", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#40671D", sidebarBorder: "#8EBD64", tableHeader: "#F1F3EC", rowHover: "#F6F6ED", selection: "#D6DBCE", selectionInk: "#242E26", tag: "#EEEEE3", tagInk: "#2B3928", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FDFDFD", disabled: "#DFE4DF", disabledInk: "#48534E", gradient: "#E3E5D2",
+  },
+  lagoon: {
+    label: "Lagoon", floor: "#EAECE5", paper: "#F9FAF6", panel: "#F5F8F4", raised: "#FCFEFD", ink: "#202E2B", muted: "#36423F", line: "#CED2CE", accent: "#1E625A", accentInk: "#FFFFFF", accentSoft: "#DFE8E3", focus: "#1E625A", sidebar: "#1D6666", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#1D684F", sidebarBorder: "#64BD9F", tableHeader: "#ECF3F0", rowHover: "#EEF6F0", selection: "#CDDCD7", selectionInk: "#202E2B", tag: "#E0ECE5", tagInk: "#203935", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FCFDFD", disabled: "#DEE4E1", disabledInk: "#48534E", gradient: "#CBE0D7",
+  },
+  glacier: {
+    label: "Glacier", floor: "#EEEEE8", paper: "#FBF9F7", panel: "#F9F8F6", raised: "#FDFEFE", ink: "#232E30", muted: "#394244", line: "#CFD2CF", accent: "#365F83", accentInk: "#FFFFFF", accentSoft: "#E3E7E9", focus: "#365F83", sidebar: "#246381", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#1D6666", sidebarBorder: "#64BDBD", tableHeader: "#F4F5F5", rowHover: "#F6F3F4", selection: "#D4DAE0", selectionInk: "#232E30", tag: "#EAF4F2", tagInk: "#273942", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FDFEFE", disabled: "#E1E6E4", disabledInk: "#48534E", gradient: "#DCF0EE",
+  },
+  sky: {
+    label: "Sky", floor: "#ECEDE8", paper: "#FAF9F8", panel: "#F7F7F7", raised: "#FDFEFE", ink: "#202E30", muted: "#364244", line: "#CFD2CF", accent: "#24607D", accentInk: "#FFFFFF", accentSoft: "#E0E7E9", focus: "#24607D", sidebar: "#28608F", sidebarText: "#F7F5EE", sidebarMuted: "#D5DED7", sidebarActive: "#1F6570", sidebarBorder: "#64B1BD", tableHeader: "#EFF4F6", rowHover: "#F1F3F6", selection: "#CFDADF", selectionInk: "#202E30", tag: "#E6F2F3", tagInk: "#213941", error: "#FCF1ED", errorInk: "#713027", errorLine: "#A73D31", success: "#E9F3EA", successInk: "#285438", input: "#FDFEFE", disabled: "#DFE5E4", disabledInk: "#48534E", gradient: "#D6ECF0",
+  },
+  cobalt: {
+    label: "Cobalt", floor: "#171F2E", paper: "#22303F", panel: "#213144", raised: "#283849", ink: "#EEF2F4", muted: "#C6D0D7", line: "#506076", accent: "#91B9FF", accentInk: "#101F33", accentSoft: "#384D68", focus: "#91B9FF", sidebar: "#223A7A", sidebarText: "#F1F4F6", sidebarMuted: "#C8D2D8", sidebarActive: "#27528A", sidebarBorder: "#517099", tableHeader: "#203148", rowHover: "#24394F", selection: "#1E4270", selectionInk: "#F4F6F7", tag: "#264767", tagInk: "#E1EDF1", error: "#402A2D", errorInk: "#FFD3CC", errorLine: "#EA8B7D", success: "#263B32", successInk: "#C9EAD1", input: "#1A2530", disabled: "#333D44", disabledInk: "#C2CBD0", gradient: "#1F416B",
+  },
+  iris: {
+    label: "Iris", floor: "#1C1E2F", paper: "#2A2A3A", panel: "#2D2A40", raised: "#303549", ink: "#EEF2F4", muted: "#C6D0D7", line: "#595E78", accent: "#C1A0F5", accentInk: "#1B1C35", accentSoft: "#463D5E", focus: "#C1A0F5", sidebar: "#4A227A", sidebarText: "#F1F4F6", sidebarMuted: "#C8D2D8", sidebarActive: "#32278A", sidebarBorder: "#5A5199", tableHeader: "#2F2A45", rowHover: "#362C44", selection: "#43326B", selectionInk: "#F4F6F7", tag: "#482F52", tagInk: "#E1EDF1", error: "#402A2D", errorInk: "#FFD3CC", errorLine: "#EA8B7D", success: "#263B32", successInk: "#C9EAD1", input: "#1D2431", disabled: "#333D44", disabledInk: "#C2CBD0", gradient: "#403166",
+  },
+  plum: {
+    label: "Plum", floor: "#1C1E27", paper: "#2A2C37", panel: "#2C2C38", raised: "#313541", ink: "#EEF2F4", muted: "#C6D0D7", line: "#585E6B", accent: "#D5A0C1", accentInk: "#1A1C26", accentSoft: "#493D4C", focus: "#D5A0C1", sidebar: "#7A2275", sidebarText: "#F1F4F6", sidebarMuted: "#C8D2D8", sidebarActive: "#8A2752", sidebarBorder: "#995170", tableHeader: "#2E2B38", rowHover: "#37303D", selection: "#46314A", selectionInk: "#F4F6F7", tag: "#4A3746", tagInk: "#E1EDF1", error: "#402A2D", errorInk: "#FFD3CC", errorLine: "#EA8B7D", success: "#263B32", successInk: "#C9EAD1", input: "#1C242D", disabled: "#333D44", disabledInk: "#C2CBD0", gradient: "#443148",
+  },
+  aurora: {
+    label: "Aurora", floor: "#172028", paper: "#1F2F36", panel: "#1E3037", raised: "#2B3644", ink: "#EEF2F4", muted: "#C6D0D7", line: "#50616C", accent: "#84D9C1", accentInk: "#102027", accentSoft: "#30504F", focus: "#84D9C1", sidebar: "#1C5E65", sidebarText: "#F1F4F6", sidebarMuted: "#C8D2D8", sidebarActive: "#27288A", sidebarBorder: "#515399", tableHeader: "#1E3138", rowHover: "#1E373B", selection: "#283B55", selectionInk: "#F4F6F7", tag: "#1D4444", tagInk: "#E1EDF1", error: "#402A2D", errorInk: "#FFD3CC", errorLine: "#EA8B7D", success: "#263B32", successInk: "#C9EAD1", input: "#1A252D", disabled: "#333D44", disabledInk: "#C2CBD0", gradient: "#273A52",
+  },
+};
+
+export const themeAppearance: Record<AppTheme, ThemeAppearanceRecord> = {
+  workshop: { mode: "light", swatchStops: ["#376A52", "#A9894D", "#B8C8A4"], sidebarStops: ["#1E6941", "#1E6A2B", "#46661D"], primaryStops: ["#213F31", "#65522E", "#6D7762"], primaryInk: "#FFFFFF" },
+  coral: { mode: "light", swatchStops: ["#EF715E", "#D94E81", "#F2B99E"], sidebarStops: ["#9E3B2C", "#9E2C56", "#914829"], primaryStops: ["#EF715E", "#D94E81", "#F2B99E"], primaryInk: "#101820" },
+  lavender: { mode: "light", swatchStops: ["#8675D2", "#6588D8", "#D68DAF"], sidebarStops: ["#542C9E", "#2C419E", "#952C9E"], primaryStops: ["#8675D2", "#6588D8", "#D68DAF"], primaryInk: "#101820" },
+  ocean: { mode: "light", swatchStops: ["#174B71", "#168B91", "#4BBAC0"], sidebarStops: ["#2B5E99", "#1F656F", "#1D6761"], primaryStops: ["#10334D", "#0F5F63", "#337E83"], primaryInk: "#FFFFFF" },
+  mint: { mode: "light", swatchStops: ["#4BAE83", "#3DB8AC", "#B6CE68"], sidebarStops: ["#1E6947", "#1D6760", "#2A6A1E"], primaryStops: ["#4BAE83", "#3DB8AC", "#B6CE68"], primaryInk: "#101820" },
+  sunset: { mode: "light", swatchStops: ["#E56C35", "#D84771", "#F0A45E"], sidebarStops: ["#8C4C27", "#9E2C50", "#7B5523"], primaryStops: ["#934522", "#8B2E49", "#9A693C"], primaryInk: "#FFFFFF" },
+  stone: { mode: "light", swatchStops: ["#737D78", "#AE8588", "#D8D5CC"], sidebarStops: ["#4A615B", "#70555A", "#685A4F"], primaryStops: ["#3E4441", "#5E484A", "#75736F"], primaryInk: "#FFFFFF" },
+  midnight: { mode: "dark", swatchStops: ["#182E55", "#394E8D", "#347E83"], sidebarStops: ["#22437A", "#25227A", "#1B5E62"], primaryStops: ["#182E55", "#394E8D", "#347E83"], primaryInk: "#FFFFFF" },
+  rose: { mode: "light", swatchStops: ["#C84F78", "#A93374", "#B97292"], sidebarStops: ["#9E2C58", "#9E2C78", "#9E2C49"], primaryStops: ["#AB4467", "#902C63", "#9E617D"], primaryInk: "#FFFFFF" },
+  peach: { mode: "light", swatchStops: ["#F0A17C", "#E87969", "#EBC8A5"], sidebarStops: ["#99422B", "#9E2C3B", "#8A4D27"], primaryStops: ["#F0A17C", "#E87969", "#EBC8A5"], primaryInk: "#101820" },
+  ember: { mode: "dark", swatchStops: ["#522638", "#A9333D", "#D66537"], sidebarStops: ["#7A2244", "#7A2227", "#7A3E22"], primaryStops: ["#472130", "#922C35", "#B9572F"], primaryInk: "#FFFFFF" },
+  amber: { mode: "light", swatchStops: ["#E0A52F", "#B97527", "#F0CD68"], sidebarStops: ["#735920", "#825124", "#6B5C1E"], primaryStops: ["#E0A52F", "#B97527", "#F0CD68"], primaryInk: "#101820" },
+  meadow: { mode: "light", swatchStops: ["#477342", "#8D9A54", "#B3BE72"], sidebarStops: ["#1F6A1E", "#40671D", "#1E6A31"], primaryStops: ["#2D4829", "#596135", "#707748"], primaryInk: "#FFFFFF" },
+  lagoon: { mode: "light", swatchStops: ["#147F80", "#26866A", "#54B6A0"], sidebarStops: ["#1D6666", "#1D684F", "#206573"], primaryStops: ["#0E595A", "#1B5E4A", "#3B7F70"], primaryInk: "#FFFFFF" },
+  glacier: { mode: "light", swatchStops: ["#76B8D4", "#70CED0", "#A99BCB"], sidebarStops: ["#246381", "#1D6666", "#472C9E"], primaryStops: ["#76B8D4", "#70CED0", "#A99BCB"], primaryInk: "#101820" },
+  sky: { mode: "light", swatchStops: ["#399BD2", "#55C0D2", "#729CE0"], sidebarStops: ["#28608F", "#1F6570", "#2C4B9E"], primaryStops: ["#399BD2", "#55C0D2", "#729CE0"], primaryInk: "#101820" },
+  cobalt: { mode: "dark", swatchStops: ["#123B9B", "#1768D2", "#348DE0"], sidebarStops: ["#223A7A", "#22487A", "#222A7A"], primaryStops: ["#0F3282", "#1357B0", "#2C76BC"], primaryInk: "#FFFFFF" },
+  iris: { mode: "dark", swatchStops: ["#5927A6", "#7542CD", "#A23F9C"], sidebarStops: ["#4A227A", "#2D227A", "#7A2273"], primaryStops: ["#5927A6", "#7542CD", "#A23F9C"], primaryInk: "#FFFFFF" },
+  plum: { mode: "dark", swatchStops: ["#542644", "#803C70", "#A95771"], sidebarStops: ["#7A2275", "#7A2248", "#7A2260"], primaryStops: ["#542644", "#803C70", "#A95771"], primaryInk: "#FFFFFF" },
+  aurora: { mode: "dark", swatchStops: ["#123F48", "#395294", "#16826C"], sidebarStops: ["#1C5E65", "#22247A", "#1B6049"], primaryStops: ["#123F48", "#395294", "#16826C"], primaryInk: "#FFFFFF" },
 };
 
 export function themeCssVariables(theme: AppTheme): Record<`--${string}`, string> {
   const palette = themePalettes[theme];
+  const appearance = themeAppearance[theme];
+  const gradient = (stops: readonly string[]): string => `linear-gradient(135deg, ${stops.join(", ")})`;
   return {
     "--floor": palette.floor,
     "--paper": palette.paper,
@@ -92,5 +189,10 @@ export function themeCssVariables(theme: AppTheme): Record<`--${string}`, string
     "--disabled-bg": palette.disabled,
     "--disabled-ink": palette.disabledInk,
     "--theme-gradient": palette.gradient,
+    "--theme-primary-gradient": gradient(appearance.primaryStops),
+    "--theme-primary-ink": appearance.primaryInk,
+    "--theme-swatch-gradient": gradient(appearance.swatchStops),
+    "--sidebar-gradient": gradient(appearance.sidebarStops),
+    "--theme-mode": appearance.mode,
   };
 }

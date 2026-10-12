@@ -474,7 +474,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           {!sidebarOpen && <span className="collapsed-library-context" title={library?.rootPath}>{library?.name ?? "No library selected"}</span>}
-          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={(next) => { void setTheme(next); }} /><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span><button type="button" className="avatar-button" title="Local app; no account needed" aria-label="Local app; no account needed">TA</button></div>
+          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span><button type="button" className="avatar-button" title="Local app; no account needed" aria-label="Local app; no account needed">TA</button></div>
         </header>
 
         <div className="page-content">
