@@ -4,7 +4,7 @@ Items below track feature status and planned work; each item states whether it i
 
 ## THEME-REVAMP — Gradient palettes and swatch-grid picker
 
-**Status:** Implemented and locally validated on 2026-10-09; user authorized PR-based preparation and publication of unsigned prerelease v0.2.0. Automated checks and isolated macOS native acceptance passed for feature source. Windows native UI, exact Tab focus handoff and signed distribution remain open; no stable/all-platform acceptance implied.
+**Status:** Implemented, validated on feature source and published in unsigned prerelease v0.2.0 on 2026-10-12. Exact merged source: [`f63186fd9db9502266c98320905dd71645c5bd20`](https://github.com/minhtrancmvn/tag-based-asset-manager/commit/f63186fd9db9502266c98320905dd71645c5bd20). Automated checks and isolated macOS native acceptance passed for feature source. Windows native UI, exact Tab focus handoff and signed distribution remain open; no stable/all-platform acceptance implied.
 
 ### User request
 
@@ -32,9 +32,9 @@ Approved on 2026-10-09: twenty full themes (all original eight visually redesign
 
 ### Verification status and remaining acceptance
 
-Frontend full suite: **248 tests / 15 files** pass; typecheck/production build pass. Rust: **88 pass / 1 ignored**; fmt/strict Clippy pass. Palette tests cover twenty themes, semantic text/focus states and sampled primary/sidebar gradients. Signature gradients drive primary actions; disabled primary actions revert to readable solid disabled colors. Sidebar/search disabled text remains on existing parent surface.
+Frontend full suite: **248 tests / 15 files** pass; typecheck/production build pass. Rust: **88 pass / 1 ignored** on macOS; **76 pass / 1 ignored** on Windows CI. Formatting and strict Clippy passed. Palette tests cover twenty themes, semantic text/focus states and sampled primary/sidebar gradients. Signature gradients drive primary actions; disabled primary actions revert to readable solid disabled colors. Sidebar/search disabled text remains on existing parent surface.
 
-Isolated macOS native matrix report records commits for all twenty themes; native settings record final `aurora` and per-theme results report catalog/settings/asset/sidecar preservation. At minimum 820×600 all twenty swatches fit. Validation report records Right Arrow focus-only, Return commit and Escape trigger-focus restoration; the archived task plan remains stale/unchecked despite later results, and raw keyboard snapshots do not independently establish each event. A later Tab event dismissed the popover, but exact focus destination was not captured. Synthetic library/app-data only; Windows native UI/installer acceptance remains unavailable/unverified. These are isolated-source checks, not v0.2.0 package acceptance; fresh release builds and CI are pending. Older eight-theme builds cannot load new IDs; downgrade requires original preset or compatible settings backup. No v0.2.0 pull request, package or release has been published yet.
+Isolated macOS native matrix report records commits for all twenty themes; native settings record final `aurora` and per-theme results report catalog/settings/asset/sidecar preservation. At minimum 820×600 all twenty swatches fit. Validation report records Right Arrow focus-only, Return commit and Escape trigger-focus restoration; the archived task plan remains stale/unchecked despite later results, and raw keyboard snapshots do not independently establish each event. A later Tab event dismissed the popover, but exact focus destination was not captured. Synthetic library/app-data only; Windows native UI/installer acceptance remains unverified. These are isolated-source checks, not package runtime acceptance. v0.2.0 was published as an unsigned prerelease from exact merged source `f63186fd9db9502266c98320905dd71645c5bd20`; downloaded public assets match preserved local manifest. Older eight-theme builds cannot load new IDs; downgrade requires original preset or compatible settings backup.
 
 ## NOTES-EDIT — Single-item notes editor
 

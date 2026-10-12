@@ -13,6 +13,31 @@ For open release gates, see [release readiness](docs/release-readiness.md). User
 - All four remote asset IDs, names, sizes and SHA-256 digests were unchanged by publication; package/server digests match preserved local files. Release notes retain unsigned/deferred acceptance warnings. Stable release approval remains separate.
 - Publication evidence: `release-build-6jm1apzo/publication-before.json`, `publication-request.json`, `publication-after.json`, `publication-tag.json` and `published-release-notes.md` under the local evidence root. Later isolated native checks are documented in [release readiness](docs/release-readiness.md); they do not change these package hashes or establish production-installer acceptance.
 
+## Build 2026-10-12 — 0.2.0 — unsigned prerelease candidate
+
+| Field | Value |
+|---|---|
+| Source | [`f63186fd9db9502266c98320905dd71645c5bd20`](https://github.com/minhtrancmvn/tag-based-asset-manager/commit/f63186fd9db9502266c98320905dd71645c5bd20), squash-merged [PR #4](https://github.com/minhtrancmvn/tag-based-asset-manager/pull/4) |
+| Source tree | `f831a822fb3c0b866a00b01526950ef1e759fe80`, identical to reviewed feature source |
+| macOS build | Clean `release/build-v0.2.0` worktree; `pnpm tauri build --bundles app,dmg --no-sign --ci -- --locked` |
+| Windows build | [Run 38197210176](https://github.com/minhtrancmvn/tag-based-asset-manager/actions/runs/38197210176), SUCCESS on exact merged commit; `pnpm tauri build --bundles nsis --no-sign --ci -- --locked` |
+| Tests | Frontend **248 passed / 15 files** on both hosts; Rust **88 passed / 1 ignored** on macOS and **76 passed / 1 ignored** on Windows; type/build/fmt/strict Clippy passed |
+| macOS structure | Mach-O `arm64`; bundle identifier `com.tagbasedassetmanager.desktop`; bundle/short version `0.2.0`; DMG and app ZIP integrity passed |
+| Windows structure | Valid NSIS PE header; runner/preserved SHA-256 match; CI output targets x64. Bootstrapper is x86; payload not independently extracted |
+| Signing/runtime | No Developer ID signing/notarization; linker ad hoc signature present. Windows unsigned. Production app and installer not executed |
+| Inputs | All tracked source/config/lockfile bytes unchanged during build; packages preserved outside replaceable target output |
+| Publication | [Unsigned prerelease v0.2.0](https://github.com/minhtrancmvn/tag-based-asset-manager/releases/tag/v0.2.0), published **2026-10-12 at 03:52:17 UTC**; prerelease=true, draft=false, latest disabled |
+| Remote verification | Tag targets exact `f63186fd9db9502266c98320905dd71645c5bd20`; four asset names/sizes/server digests and downloaded bytes match local manifest. No stable/latest release designated; v0.1.0 tag/release/assets unchanged |
+
+| Download name | Bytes | SHA-256 |
+|---|---:|---|
+| `Tag-Based-Asset-Manager_0.2.0_aarch64.dmg` | 3,360,926 | `b71040849cf910425282aad6062e9feda386688a4e5d2ba0b66fbcce2306c9c1` |
+| `Tag-Based-Asset-Manager_0.2.0_arm64.app.zip` | 3,255,381 | `3c5a5edd5e4dc2b12417ab6461583e5a8618161819d428ce811691eac7ea0d68` |
+| `Tag-Based-Asset-Manager_0.2.0_x64-setup.exe` | 2,713,054 | `73f7452e6fbd66fea5b733b4b3e7f22521dbec89bf8a772d3ef85ccfc7d5257e` |
+| `SHA256SUMS.txt` | 328 | `f426801bb59f8bff085d83f3e20cc89e8b1f588f8840c580a473fe472725f3b3` |
+
+Preserved evidence folder: `release-v020-20261012-kt3zo6r_/`. Contains package/input manifests, build/test logs, DMG/signature checks and both main/PR CI downloads. Final Windows package comes from merged-source run above, not PR run 38171799710. Earlier v0.1.0 and PR-CI checksums remain specific to their own bytes. No Intel macOS package produced. Declared minimum macOS `10.13` is not runtime-tested. Platform/Tab/OneDrive/reliability/signing gates remain open; 3MF/Space preview remains backlog only.
+
 ## Build 2026-10-08 — 0.1.0 — Windows x64
 
 | Field | Value |
