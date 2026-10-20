@@ -738,6 +738,63 @@ pub async fn bulk_edit_tags(
 }
 
 #[tauri::command]
+pub async fn edit_notes(
+    library_id: String,
+    asset_id: String,
+    expected_revision: String,
+    notes: String,
+    state: State<'_, BackendState>,
+) -> CommandResult<Asset> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        edit_notes_domain(&state, &library_id, &asset_id, &expected_revision, &notes)
+    })
+    .await
+    .map_err(|error| AppError::from(format!("Notes edit task failed: {error}")))?
+}
+
+fn edit_notes_domain(
+    state: &BackendState,
+    library_id: &str,
+    asset_id: &str,
+    expected_revision: &str,
+    notes: &str,
+) -> CommandResult<Asset> {
+    let mut inner = state
+        .inner
+        .lock()
+        .map_err(|_| AppError::from("Library state unavailable"))?;
+    let root = approved_edit_root(&inner, library_id)?;
+    let prepared = prepare_tag_target(&inner, library_id, &root, asset_id, expected_revision)?;
+    let selected_entry = match &prepared.current {
+        manifest::ReadManifest::Valid { manifest, .. } => {
+            manifest.items.get(&prepared.key).cloned()
+        }
+        manifest::ReadManifest::Missing => None,
+        manifest::ReadManifest::Blocked { error, .. } => {
+            return Err(AppError::at_path(
+                format!("Manifest is blocked: {error}"),
+                &prepared.owner_dir.join(manifest::MANIFEST_NAME),
+            ));
+        }
+    };
+    let expected_target = manifest::revision(&(&selected_entry, prepared.key.as_str()));
+    let (entry, _bytes, changed) =
+        manifest::edit_notes(&prepared.owner_dir, &prepared.key, &expected_target, notes).map_err(
+            |error| AppError::at_path(error, &prepared.owner_dir.join(manifest::MANIFEST_NAME)),
+        )?;
+    let asset = prepared.with_entry(&entry);
+    if changed {
+        if let Some(snapshot) = inner.scan_snapshots.get_mut(library_id) {
+            if let Some(cached) = snapshot.assets.get_mut(asset_id) {
+                *cached = asset.clone();
+            }
+        }
+    }
+    Ok(asset)
+}
+
+#[tauri::command]
 pub async fn edit_tags(
     library_id: String,
     asset_id: String,
@@ -2163,6 +2220,146 @@ mod tests {
                 .map(|tag| tag.to_string())
                 .collect::<Vec<_>>(),
         )
+    }
+
+    #[test]
+    fn notes_edit_updates_one_scanned_asset_and_noop_preserves_bytes() {
+        let (_dir, root, state) = tag_test_library();
+        fs::write(root.join("asset.stl"), b"asset bytes").unwrap();
+        let mut manifest = manifest::Manifest::empty();
+        manifest
+            .extra
+            .insert("future".into(), serde_json::Value::from(8));
+        manifest.items.insert(
+            "asset.stl".into(),
+            manifest::Entry {
+                id: "76bfd01c-2055-43b1-996a-c3f9f4ab8f7e".into(),
+                tags: vec!["Style:KeepCase".into()],
+                notes: Some("old".into()),
+                extra: BTreeMap::from([("custom".into(), serde_json::Value::Bool(true))]),
+            },
+        );
+        fs::write(
+            root.join(manifest::MANIFEST_NAME),
+            manifest.serialize().unwrap(),
+        )
+        .unwrap();
+        let asset = scanned_asset(&root, &state, "asset.stl");
+        let updated = edit_notes_domain(
+            &state,
+            "library",
+            &asset.id,
+            &asset.metadata_revision,
+            "  revised\\nexact  ",
+        )
+        .unwrap();
+        assert_eq!(updated.notes.as_deref(), Some("  revised\\nexact  "));
+        assert_eq!(
+            updated.metadata_id.as_deref(),
+            Some("76bfd01c-2055-43b1-996a-c3f9f4ab8f7e")
+        );
+        assert_ne!(updated.metadata_revision, asset.metadata_revision);
+        let written = fs::read(root.join(manifest::MANIFEST_NAME)).unwrap();
+        let parsed = manifest::Manifest::parse(&written).unwrap();
+        assert_eq!(parsed.extra["future"], 8);
+        assert_eq!(parsed.items["asset.stl"].tags, vec!["Style:KeepCase"]);
+        assert_eq!(parsed.items["asset.stl"].extra["custom"], true);
+        let asset_bytes = fs::read(root.join("asset.stl")).unwrap();
+        assert_eq!(asset_bytes, b"asset bytes");
+
+        let no_op = edit_notes_domain(
+            &state,
+            "library",
+            &updated.id,
+            &updated.metadata_revision,
+            "  revised\\nexact  ",
+        )
+        .unwrap();
+        assert_eq!(no_op, updated);
+        assert_eq!(
+            fs::read(root.join(manifest::MANIFEST_NAME)).unwrap(),
+            written
+        );
+        assert!(edit_notes_domain(
+            &state,
+            "library",
+            &updated.id,
+            &asset.metadata_revision,
+            "stale"
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(root.join(manifest::MANIFEST_NAME)).unwrap(),
+            written
+        );
+    }
+
+    #[test]
+    fn notes_edit_clear_missing_blocked_and_disk_conflict_behaviors() {
+        let (_dir, root, state) = tag_test_library();
+        fs::write(root.join("asset.stl"), b"asset bytes").unwrap();
+        let asset = scanned_asset(&root, &state, "asset.stl");
+        let tagged = edit_tags_domain(
+            &state,
+            "library",
+            &asset.id,
+            &asset.metadata_revision,
+            &["seed".into()],
+            &[],
+        )
+        .unwrap();
+        let created = edit_notes_domain(
+            &state,
+            "library",
+            &tagged.id,
+            &tagged.metadata_revision,
+            "first",
+        )
+        .unwrap();
+        let cleared = edit_notes_domain(
+            &state,
+            "library",
+            &created.id,
+            &created.metadata_revision,
+            "",
+        )
+        .unwrap();
+        assert_eq!(cleared.notes, None);
+        let bytes = fs::read(root.join(manifest::MANIFEST_NAME)).unwrap();
+        assert!(!String::from_utf8(bytes.clone()).unwrap().contains("notes"));
+        assert!(edit_notes_domain(
+            &state,
+            "library",
+            "path:gone.stl",
+            &asset.metadata_revision,
+            "x"
+        )
+        .is_err());
+
+        let blocked = root.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join(manifest::MANIFEST_NAME), b"{broken").unwrap();
+        fs::write(blocked.join("blocked.stl"), b"asset").unwrap();
+        let blocked_asset = scanned_asset(&root, &state, "blocked/blocked.stl");
+        assert_eq!(blocked_asset.metadata_state, "blocked");
+        assert!(edit_notes_domain(
+            &state,
+            "library",
+            &blocked_asset.id,
+            &blocked_asset.metadata_revision,
+            "x"
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(blocked.join(manifest::MANIFEST_NAME)).unwrap(),
+            b"{broken"
+        );
+
+        let expected = cleared.metadata_revision.clone();
+        let manifest_path = root.join(manifest::MANIFEST_NAME);
+        fs::write(&manifest_path, b"{external edit").unwrap();
+        assert!(edit_notes_domain(&state, "library", &cleared.id, &expected, "conflict").is_err());
+        assert_eq!(fs::read(&manifest_path).unwrap(), b"{external edit");
     }
 
     #[test]

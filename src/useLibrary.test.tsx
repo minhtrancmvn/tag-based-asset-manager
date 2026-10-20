@@ -20,6 +20,7 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
     activate: vi.fn().mockResolvedValue(registered), remove: vi.fn().mockResolvedValue({ libraries: [], activeLibraryId: null }),
     scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId })), cancelScan: vi.fn().mockResolvedValue(true),
     editTags: vi.fn(async (_libraryId, _assetId, _revision, addTags) => ({ ...scanResult.assets[0], tags: addTags, metadataId: "new-uuid", metadataRevision: "rev2", metadataState: "valid" as const, status: "ready" as const })),
+    editNotes: vi.fn(async (_libraryId, _assetId, _revision, notes) => ({ ...scanResult.assets[0], notes: notes || undefined, metadataId: "new-uuid", metadataRevision: "rev-notes", metadataState: "valid" as const, status: "ready" as const })),
     bulkEditTags: vi.fn().mockResolvedValue({ assets: [], error: null }),
     saveSearch: vi.fn().mockResolvedValue(registered), deleteSearch: vi.fn().mockResolvedValue(registered),
     performAction: vi.fn().mockResolvedValue(undefined),
@@ -417,6 +418,59 @@ describe("native library lifecycle", () => {
     expect(result.current.assets[0].tags).toEqual(["category:animal"]);
     expect(result.current.assets[0].metadataId).toBe("new-uuid");
   });
+  it("applies notes only from a committed backend row and forwards revision", async () => {
+    const initial = { ...scanResult.assets[0], notes: "old" };
+    const committed = { ...initial, notes: " exact note ", metadataRevision: "rev-notes" };
+    const api = client({ scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: [initial] })), editNotes: vi.fn().mockResolvedValue(committed) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets[0].notes).toBe("old"));
+    await act(async () => { expect(await result.current.editNotes(result.current.assets[0], " exact note ")).toBe(true); });
+    expect(api.editNotes).toHaveBeenCalledWith("root1", "path:a.stl", "rev1", " exact note ");
+    expect(result.current.assets[0]).toEqual(committed);
+    expect(result.current.editingNotesAssetId).toBeNull();
+  });
+  it("holds shared metadata operation lock while notes save is pending", async () => {
+    const pending = deferred<ScanResult["assets"][number]>();
+    const initial = { ...scanResult.assets[0], notes: "old" };
+    const api = client({ scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: [initial] })), editNotes: vi.fn(() => pending.promise) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets[0].notes).toBe("old"));
+    let saving!: Promise<boolean>;
+    act(() => { saving = result.current.editNotes(result.current.assets[0], "new"); });
+    expect(result.current.editingNotesAssetId).toBe("path:a.stl");
+    await act(async () => { expect(await result.current.editTags(result.current.assets[0], ["favorite"], [])).toBe(false); await result.current.chooseLibrary(); });
+    expect(api.editTags).not.toHaveBeenCalled();
+    expect(api.choose).not.toHaveBeenCalled();
+    expect(result.current.assets[0].notes).toBe("old");
+    await act(async () => { pending.resolve({ ...initial, notes: "new" }); await saving; });
+    expect(result.current.assets[0].notes).toBe("new");
+    expect(result.current.editingNotesAssetId).toBeNull();
+  });
+  it("retains notes on failure and rejects missing or blocked rows", async () => {
+    const initial = { ...scanResult.assets[0], notes: "old" };
+    const api = client({ scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: [initial] })), editNotes: vi.fn().mockRejectedValue({ message: "Metadata changed", path: "/library/.asset-tags.json", details: "Rescan" }) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets[0].notes).toBe("old"));
+    await act(async () => { expect(await result.current.editNotes(result.current.assets[0], "new")).toBe(false); });
+    expect(result.current.assets[0].notes).toBe("old");
+    await act(async () => {
+      expect(await result.current.editNotes({ ...initial, status: "missing" }, "x")).toBe(false);
+      expect(await result.current.editNotes({ ...initial, metadataState: "blocked" }, "x")).toBe(false);
+    });
+    expect(api.editNotes).toHaveBeenCalledTimes(1);
+  });
+  it("ignores pending notes completion after unmount", async () => {
+    const pending = deferred<ScanResult["assets"][number]>();
+    const initial = { ...scanResult.assets[0], notes: "old" };
+    const api = client({ scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: [initial] })), editNotes: vi.fn(() => pending.promise) });
+    const { result, unmount } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets[0].notes).toBe("old"));
+    let editing!: Promise<boolean>;
+    act(() => { editing = result.current.editNotes(result.current.assets[0], "new"); });
+    unmount();
+    await act(async () => { pending.resolve({ ...initial, notes: "new" }); expect(await editing).toBe(false); });
+  });
+
   it("retains tags and shows error if backend edit fails", async () => {
     const api = client({ editTags: vi.fn().mockRejectedValue({ message: "Metadata changed", path: "/selected/.asset-tags.json", details: "Rescan first" }) });
     const { result } = renderHook(() => useLibrary(api));

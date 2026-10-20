@@ -74,6 +74,10 @@ describe("native DTO bridge", () => {
     await nativeClient.editTags("root1", "path:Figures/Dragon.3mf", "revision1", ["style:flexi"], ["status:printed"]);
     expect(mocks.invoke).toHaveBeenCalledWith("edit_tags", { libraryId: "root1", assetId: "path:Figures/Dragon.3mf", expectedRevision: "revision1", addTags: ["style:flexi"], removeTags: ["status:printed"] });
   });
+  it("sends only library ID, row ID, revision and note text for notes edit", async () => {
+    await nativeClient.editNotes("root1", "path:Figures/Dragon.3mf", "revision-notes", "  exact text  ");
+    expect(mocks.invoke).toHaveBeenCalledWith("edit_notes", { libraryId: "root1", assetId: "path:Figures/Dragon.3mf", expectedRevision: "revision-notes", notes: "  exact text  " });
+  });
   it("passes exact bulk target revisions and tag summary", async () => {
     const targets = [{ assetId: "path:Dragon.3mf", expectedRevision: "rev1" }, { assetId: "path:Folder", expectedRevision: "rev2" }];
     await nativeClient.bulkEditTags("root1", targets, ["favorite"], ["status:printed"]);

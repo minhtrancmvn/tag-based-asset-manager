@@ -25,6 +25,7 @@ pub fn run() {
             backend::delete_assets,
             backend::preview_asset,
             backend::edit_tags,
+            backend::edit_notes,
             backend::bulk_edit_tags,
             backend::upsert_saved_search,
             backend::delete_saved_search,

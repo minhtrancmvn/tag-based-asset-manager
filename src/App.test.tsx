@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { useLibrary } from "./useLibrary";
 import type { Asset, LibraryState, LibrarySummary, ScanIssue } from "./types";
@@ -25,6 +25,7 @@ const libraryState: LibraryState = { libraries: [library, secondLibrary], active
 const actions = {
   setTheme: vi.fn<(_: import("./themes").AppTheme) => Promise<boolean>>(),
   editTags: vi.fn<(_: Asset, __: string[], ___: string[]) => Promise<boolean>>(),
+  editNotes: vi.fn<(_: Asset, __: string) => Promise<boolean>>(),
   bulkEditTags: vi.fn<(_: Asset[], __: string[], ___: string[]) => Promise<boolean>>(),
   saveSearch: vi.fn<(_: string, __: import("./types").SearchFilters, ___?: string) => Promise<boolean>>(),
   deleteSearch: vi.fn<(_: string) => Promise<boolean>>(),
@@ -83,6 +84,8 @@ function setLibraryResult(overrides: Partial<{
     cancelScan: actions.cancelScan,
     dismissError: actions.dismissError,
     editTags: actions.editTags,
+    editNotes: actions.editNotes,
+    editingNotesAssetId: null,
     bulkEditTags: actions.bulkEditTags,
     bulkEditing: false,
     savedSearches: [],
@@ -726,6 +729,102 @@ describe("scanned library UI", () => {
     expect(screen.getAllByRole("button", { name: "Remove tag style:flexi" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "style:flexi" })).toHaveLength(2);
     expect(screen.getByText(/asset files and paths stay untouched/i)).toBeTruthy();
+  });
+
+  it("edits notes with explicit Save and Cancel; empty Save clears optional notes", async () => {
+    const noted: Asset = { ...assets[0], notes: "Print slowly.", metadataId: "notes-uuid", metadataRevision: "revision-notes", metadataState: "valid" };
+    setLibraryResult({ assets: [noted] });
+    actions.editNotes.mockResolvedValue(true);
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    expect(screen.getByText("Print slowly.")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Notes" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+    const editor = screen.getByRole("textbox", { name: "Notes" }) as HTMLTextAreaElement;
+    expect(editor.value).toBe("Print slowly.");
+    fireEvent.change(editor, { target: { value: "  Keep exact spaces.  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel notes" }));
+    expect(screen.queryByRole("textbox", { name: "Notes" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Notes" }), { target: { value: "" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save notes" })); });
+    expect(actions.editNotes).toHaveBeenCalledWith(noted, "");
+    expect(screen.queryByRole("textbox", { name: "Notes" })).toBeNull();
+  });
+
+  it("retains notes draft on save failure and cancels with Escape", async () => {
+    const noted: Asset = { ...assets[0], notes: "Original", metadataId: "notes-uuid", metadataRevision: "revision-notes", metadataState: "valid" };
+    setLibraryResult({ assets: [noted] });
+    actions.editNotes.mockResolvedValue(false);
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Notes" }), { target: { value: "Draft" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save notes" })); });
+    expect((screen.getByRole("textbox", { name: "Notes" }) as HTMLTextAreaElement).value).toBe("Draft");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Notes" }), { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Notes" })).toBeNull();
+    expect(screen.getByText("Original")).toBeTruthy();
+  });
+
+  it("discards notes draft immediately when selection moves to another valid asset", async () => {
+    const first: Asset = { ...assets[0], notes: "First", metadataId: "notes-uuid-1", metadataRevision: "revision-one", metadataState: "valid" };
+    const second: Asset = { ...assets[0], id: "asset-2", name: "Second.stl", relativePath: "Second.stl", notes: "Second", metadataId: "notes-uuid-2", metadataRevision: "revision-two", metadataState: "valid" };
+    setLibraryResult({ assets: [first, second] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Notes" }), { target: { value: "Draft" } });
+    fireEvent.click(assetRows()[1]);
+    expect(screen.queryByRole("textbox", { name: "Notes" })).toBeNull();
+    expect(screen.queryByText("Draft")).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit notes" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Second", { selector: ".notes-text" })).toBeTruthy());
+  });
+
+  it("does not restore a discarded notes draft after switching away and back", async () => {
+    const first: Asset = { ...assets[0], notes: "First", metadataId: "notes-uuid-1", metadataRevision: "revision-one", metadataState: "valid" };
+    const second: Asset = { ...assets[0], id: "asset-2", name: "Second.stl", relativePath: "Second.stl", notes: "Second", metadataId: "notes-uuid-2", metadataRevision: "revision-two", metadataState: "valid" };
+    setLibraryResult({ assets: [first, second] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Notes" }), { target: { value: "Draft" } });
+    fireEvent.click(assetRows()[1]);
+    await waitFor(() => expect(screen.getByText("Second", { selector: ".notes-text" })).toBeTruthy());
+    fireEvent.click(assetRows()[0]);
+    await waitFor(() => expect(screen.getByText("First", { selector: ".notes-text" })).toBeTruthy());
+    expect(screen.queryByRole("textbox", { name: "Notes" })).toBeNull();
+    expect(screen.queryByText("Draft")).toBeNull();
+  });
+
+  it("enforces the byte limit on notes editor", () => {
+    const noted: Asset = { ...assets[0], notes: "First", metadataId: "notes-uuid-1", metadataRevision: "revision-one", metadataState: "valid" };
+    setLibraryResult({ assets: [noted] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit notes" }));
+    const editor = screen.getByRole("textbox", { name: "Notes" }) as HTMLTextAreaElement;
+    expect(editor.maxLength).toBe(64 * 1024);
+    fireEvent.change(editor, { target: { value: "n".repeat(64 * 1024) } });
+    expect((screen.getByRole("button", { name: "Save notes" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(editor.value.length).toBe(64 * 1024);
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(editor, { target: { value: "é".repeat(32 * 1024 + 1) } });
+    expect(editor.value.length).toBe(32 * 1024 + 1);
+    expect(screen.getByRole("alert").textContent).toContain("UTF-8 limit");
+    expect((screen.getByRole("button", { name: "Save notes" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps notes read-only for missing and blocked metadata", () => {
+    const missing = { ...assets[0], status: "missing", metadataState: "valid", notes: "Historical" } as Asset;
+    const blocked = { ...assets[1], status: "warning", metadataState: "blocked", notes: "Blocked note" } as Asset;
+    setLibraryResult({ assets: [missing, blocked] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    expect(screen.queryByRole("button", { name: "Edit notes" })).toBeNull();
+    fireEvent.click(assetRows()[1]);
+    expect(screen.queryByRole("button", { name: "Edit notes" })).toBeNull();
   });
 
   it("disables edits across rows while one metadata edit is in flight", () => {

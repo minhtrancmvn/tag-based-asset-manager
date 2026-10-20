@@ -15,6 +15,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<AppError | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [editingNotesAssetId, setEditingNotesAssetId] = useState<string | null>(null);
   const [bulkEditing, setBulkEditing] = useState(false);
   const [savingSearch, setSavingSearch] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
@@ -185,6 +186,28 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     } finally {
       operation.current = false;
       if (mounted.current) setEditingAssetId(null);
+    }
+  }, [client]);
+  const editNotes = useCallback(async (asset: Asset, notes: string): Promise<boolean> => {
+    const libraryId = stateRef.current.activeLibraryId;
+    if (!client.isDesktop || !libraryId || operation.current || scanBusy.current || asset.status === "missing" || asset.metadataState === "blocked" || !asset.metadataRevision) return false;
+    operation.current = true;
+    const generation = scanGeneration.current;
+    const current = () => mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId;
+    setEditingNotesAssetId(asset.id);
+    setError(null);
+    try {
+      const updated = await client.editNotes(libraryId, asset.id, asset.metadataRevision, notes);
+      if (!current()) return false;
+      if (updated.id !== asset.id || updated.relativePath !== asset.relativePath) throw new Error("Notes response did not match the selected asset.");
+      setAssets((rows) => rows.map((row) => row.id === asset.id ? updated : row));
+      return true;
+    } catch (failure) {
+      if (current()) setError(toAppError(failure));
+      return false;
+    } finally {
+      operation.current = false;
+      if (mounted.current) setEditingNotesAssetId(null);
     }
   }, [client]);
   const bulkEditTags = useCallback(async (targets: Asset[], addTags: string[], removeTags: string[]): Promise<boolean> => {
@@ -359,7 +382,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   return {
     state, theme: state.theme ?? "workshop", library: state.libraries.find((library) => library.id === state.activeLibraryId) ?? null,
     assets, issues, loading, scanning, scanStopped, progress, error, cancelScan,
-    chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId,
+    chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId, editNotes, editingNotesAssetId,
     bulkEditTags, bulkEditing, savedSearches: (state.savedSearches ?? []).filter((search) => search.libraryId === state.activeLibraryId),
     savingSearch, saveSearch, deleteSearch, savingTheme, setTheme, performAction, actionBusy,
     validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, recoveryBusy,
