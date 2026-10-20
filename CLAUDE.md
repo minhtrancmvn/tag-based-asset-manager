@@ -110,3 +110,24 @@ This project is indexed by GitNexus as **tag-based-asset-manager** (1141 symbols
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Agent Orchestration
+
+### Model Routing
+
+- Use Opus as the primary model for planning and synthesis.
+- Delegate independent, bounded work to Sonnet.
+- Use Haiku for mechanical research.
+- Use Fable only when architectural ambiguity warrants its cost.
+- Verify every agent's output before relying on it.
+
+### Agent Worktree Lifecycle
+
+- Clean up agent-created worktrees only after the agent's task is complete and its changes are committed and pushed.
+- Then remove that agent-created worktree immediately, run `git worktree prune`, and verify `git worktree list` has no stale agent-created worktrees.
+- Never remove active or user-created worktrees.
+
+### Background Work
+
+- Always tell the user when they must wait for a subagent or background task to finish before sending the next message.
+- Name what is still running and what completion signal to expect. When nothing is pending, no notice is needed.
