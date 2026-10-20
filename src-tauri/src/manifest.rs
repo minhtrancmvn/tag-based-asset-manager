@@ -307,6 +307,69 @@ pub fn edit_entry(
     Ok((entry, bytes))
 }
 
+pub fn edit_notes(
+    directory: &Path,
+    key: &str,
+    expected_target_revision: &str,
+    notes: &str,
+) -> Result<(Entry, Vec<u8>, bool), String> {
+    validate_key(key)?;
+    if notes.len() > 64 * 1024 {
+        return Err("Notes exceed the 64 KiB UTF-8 limit".into());
+    }
+    let path = directory.join(MANIFEST_NAME);
+    let current = read(directory);
+    let (mut manifest, original_bytes) = match current {
+        ReadManifest::Missing => (Manifest::empty(), None),
+        ReadManifest::Valid { manifest, bytes } => (manifest, Some(bytes)),
+        ReadManifest::Blocked { error, .. } => return Err(format!("Manifest is blocked: {error}")),
+    };
+    let existing = manifest.items.get(key).cloned();
+    if existing.is_none() {
+        return Err("Notes require an existing metadata entry; add a tag first".into());
+    }
+    let actual_revision = revision(&(&existing, key));
+    if actual_revision != expected_target_revision {
+        return Err("Metadata changed since scan; rescan before editing".into());
+    }
+    let (entry, changed) = mutate_notes(&mut manifest, key, notes);
+    if !changed {
+        return Ok((entry, original_bytes.unwrap_or_default(), false));
+    }
+    let bytes = manifest.serialize()?;
+    write_atomic(&path, original_bytes.as_deref(), &bytes)?;
+    Ok((entry, bytes, true))
+}
+
+pub fn mutate_notes(manifest: &mut Manifest, key: &str, notes: &str) -> (Entry, bool) {
+    let next_notes = (!notes.is_empty()).then(|| notes.to_string());
+    if manifest
+        .items
+        .get(key)
+        .and_then(|entry| entry.notes.as_deref())
+        == next_notes.as_deref()
+    {
+        return (
+            manifest
+                .items
+                .get(key)
+                .cloned()
+                .unwrap_or_else(Entry::absent),
+            false,
+        );
+    }
+    let entry = manifest
+        .items
+        .entry(key.to_string())
+        .or_insert_with(|| Entry {
+            id: uuid::Uuid::new_v4().to_string(),
+            ..Entry::absent()
+        });
+    entry.notes = next_notes;
+    manifest.updated_at = now();
+    (entry.clone(), true)
+}
+
 // Validated owner/key only. Shared by single and grouped edits; remove then add means adds win overlap.
 pub fn mutate_tags(
     manifest: &mut Manifest,
@@ -543,6 +606,131 @@ mod tests {
         let updated = Manifest::parse(&output).unwrap();
         assert!(updated.items.contains_key("gone.stl"));
         assert_eq!(updated.extra["future"], 8);
+    }
+
+    #[test]
+    fn edit_notes_clears_empty_preserves_nonempty_text_and_keeps_other_metadata() {
+        let dir = tempdir().unwrap();
+        let mut manifest = Manifest::empty();
+        manifest.extra.insert("future".into(), Value::from(8));
+        manifest.items.insert(
+            "asset.stl".into(),
+            Entry {
+                id: "76bfd01c-2055-43b1-996a-c3f9f4ab8f7e".into(),
+                tags: vec![" KeepCase ".into()],
+                notes: Some("before".into()),
+                extra: BTreeMap::from([("custom".into(), Value::from(true))]),
+            },
+        );
+        manifest.items.insert(
+            "stale.stl".into(),
+            Entry {
+                id: "bb4e208d-7415-4ba7-9d7d-92192611f6f8".into(),
+                tags: vec!["stale".into()],
+                notes: None,
+                extra: BTreeMap::new(),
+            },
+        );
+        fs::write(
+            dir.path().join(MANIFEST_NAME),
+            manifest.serialize().unwrap(),
+        )
+        .unwrap();
+        let expected = manifest.items["asset.stl"].clone();
+        let expected_revision = revision(&(Some(expected.clone()), "asset.stl"));
+
+        let (entry, bytes, changed) = edit_notes(
+            dir.path(),
+            "asset.stl",
+            &expected_revision,
+            "  revised\\ntext  ",
+        )
+        .unwrap();
+        assert!(changed);
+        assert_eq!(entry.id, expected.id);
+        assert_eq!(entry.tags, expected.tags);
+        assert_eq!(entry.notes.as_deref(), Some("  revised\\ntext  "));
+        assert_eq!(entry.extra, expected.extra);
+        let updated = Manifest::parse(&bytes).unwrap();
+        assert_eq!(updated.extra["future"], 8);
+        assert!(updated.items.contains_key("stale.stl"));
+
+        let next = revision(&(Some(updated.items["asset.stl"].clone()), "asset.stl"));
+        let (entry, bytes, changed) = edit_notes(dir.path(), "asset.stl", &next, "").unwrap();
+        assert!(changed);
+        assert_eq!(entry.notes, None);
+        assert!(!String::from_utf8(bytes).unwrap().contains("notes"));
+    }
+
+    #[test]
+    fn notes_noop_and_stale_revision_never_rewrite_manifest() {
+        let dir = tempdir().unwrap();
+        let mut manifest = Manifest::empty();
+        manifest.items.insert(
+            "asset.stl".into(),
+            Entry {
+                id: "76bfd01c-2055-43b1-996a-c3f9f4ab8f7e".into(),
+                tags: vec!["OriginalCase".into()],
+                notes: Some("unchanged".into()),
+                extra: BTreeMap::new(),
+            },
+        );
+        let original = manifest.serialize().unwrap();
+        fs::write(dir.path().join(MANIFEST_NAME), &original).unwrap();
+        let expected = revision(&(Some(manifest.items["asset.stl"].clone()), "asset.stl"));
+        let (_, returned, changed) =
+            edit_notes(dir.path(), "asset.stl", &expected, "unchanged").unwrap();
+        assert!(!changed);
+        assert_eq!(returned, original);
+        assert_eq!(fs::read(dir.path().join(MANIFEST_NAME)).unwrap(), original);
+        assert!(edit_notes(dir.path(), "asset.stl", "stale", "new").is_err());
+        assert_eq!(fs::read(dir.path().join(MANIFEST_NAME)).unwrap(), original);
+    }
+
+    #[test]
+    fn notes_edit_does_not_create_identity_for_untracked_entry() {
+        let dir = tempdir().unwrap();
+        let before = Manifest::empty().serialize().unwrap();
+        fs::write(dir.path().join(MANIFEST_NAME), &before).unwrap();
+        let expected = revision(&(None::<Entry>, "asset.stl"));
+        assert!(edit_notes(dir.path(), "asset.stl", &expected, "first note").is_err());
+        assert_eq!(fs::read(dir.path().join(MANIFEST_NAME)).unwrap(), before);
+        assert!(!Manifest::parse(&before)
+            .unwrap()
+            .items
+            .contains_key("asset.stl"));
+    }
+
+    #[test]
+    fn notes_edit_enforces_utf8_byte_limit_before_manifest_write() {
+        let dir = tempdir().unwrap();
+        let mut manifest = Manifest::empty();
+        manifest.items.insert(
+            "asset.stl".into(),
+            Entry {
+                id: "76bfd01c-2055-43b1-996a-c3f9f4ab8f7e".into(),
+                tags: vec!["seed".into()],
+                notes: None,
+                extra: BTreeMap::new(),
+            },
+        );
+        let before = manifest.serialize().unwrap();
+        fs::write(dir.path().join(MANIFEST_NAME), &before).unwrap();
+        let expected = revision(&(Some(manifest.items["asset.stl"].clone()), "asset.stl"));
+        let multibyte_overflow = "é".repeat(32 * 1024 + 1);
+        assert!(edit_notes(dir.path(), "asset.stl", &expected, &multibyte_overflow).is_err());
+        assert_eq!(fs::read(dir.path().join(MANIFEST_NAME)).unwrap(), before);
+    }
+
+    #[test]
+    fn notes_edit_rejects_blocked_manifest_and_invalid_key_without_changes() {
+        let dir = tempdir().unwrap();
+        let malformed = b"{broken";
+        fs::write(dir.path().join(MANIFEST_NAME), malformed).unwrap();
+        assert!(edit_notes(dir.path(), "asset.stl", "revision", "new").is_err());
+        assert_eq!(fs::read(dir.path().join(MANIFEST_NAME)).unwrap(), malformed);
+        assert!(edit_notes(dir.path(), "../outside", "revision", "new").is_err());
+        assert_eq!(fs::read(dir.path().join(MANIFEST_NAME)).unwrap(), malformed);
     }
 
     #[test]

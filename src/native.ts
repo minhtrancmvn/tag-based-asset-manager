@@ -13,6 +13,7 @@ export interface LibraryClient {
   deleteAssets: (libraryId: string, targets: BulkTagTarget[]) => Promise<TrashResult>;
   previewAsset: (libraryId: string, assetId: string) => Promise<PreviewResult>;
   editTags: (libraryId: string, assetId: string, expectedRevision: string, addTags: string[], removeTags: string[]) => Promise<Asset>;
+  editNotes: (libraryId: string, assetId: string, expectedRevision: string, notes: string) => Promise<Asset>;
   bulkEditTags: (libraryId: string, targets: BulkTagTarget[], addTags: string[], removeTags: string[]) => Promise<BulkTagResult>;
   saveSearch: (libraryId: string, name: string, filters: SearchFilters, searchId: string | null) => Promise<LibraryState>;
   deleteSearch: (libraryId: string, searchId: string) => Promise<LibraryState>;
@@ -42,6 +43,7 @@ export const nativeClient: LibraryClient = {
   activate: (libraryId) => invoke<LibraryState>("activate_library", { libraryId }),
   remove: (libraryId) => invoke<LibraryState>("remove_library", { libraryId }),
   editTags: (libraryId, assetId, expectedRevision, addTags, removeTags) => invoke<Asset>("edit_tags", { libraryId, assetId, expectedRevision, addTags, removeTags }),
+  editNotes: (libraryId, assetId, expectedRevision, notes) => invoke<Asset>("edit_notes", { libraryId, assetId, expectedRevision, notes }),
   bulkEditTags: (libraryId, targets, addTags, removeTags) => invoke<BulkTagResult>("bulk_edit_tags", { libraryId, targets, addTags, removeTags }),
   saveSearch: (libraryId, name, filters, searchId) => invoke<LibraryState>("upsert_saved_search", { libraryId, name, filters, searchId }),
   deleteSearch: (libraryId, searchId) => invoke<LibraryState>("delete_saved_search", { libraryId, searchId }),

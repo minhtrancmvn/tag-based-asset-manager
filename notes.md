@@ -68,3 +68,12 @@
 - Choreography: only initial content reveal from 4px down, 260ms `cubic-bezier(0.22,1,0.36,1)`; respect reduced motion. No animated row changes or hover motion.
 - Atmosphere: warm base + faint radial warm highlight + fine grid/tick texture only in sidebar/header; table remains quiet for readability.
 - Manual validation: no banned fonts intentionally selected; dominance approx 65/28/7; text contrast dark green on cream > 9:1, muted on cream ~4.5:1 (verify later); restrained single entrance; layered atmosphere. Estimated score 88/100; validate visually where runtime permits.
+
+
+# NOTES-EDIT implementation (2026-10-15)
+
+- Dedicated clean `feature/notes-edit` worktree from `main`; original checkout's app-icon edits and model-preview worktree untouched.
+- Add one-entry `edit_notes(libraryId, assetId, expectedRevision, notes)` native command. Reuses latest scan snapshot/root/ownership/UUID/revision preflight and manifest exact-byte atomic replacement. Existing entry required: use tag edit first to create identity. Empty string clears optional notes; nonempty text and whitespace preserved exactly; semantic no-op performs no write. UUID, tags, extras, unrelated/stale rows and asset bytes preserved.
+- Inspector has explicit Edit/Save/Cancel, 64 KiB textarea bound, Escape cancel, read mode, save failure keeps draft. Missing/blocked/untracked rows read-only. Draft tied to (library,row,revision); selection switch discards it immediately. Hook serializes with metadata operations and ignores late unmounted results; shared operation lock precludes concurrent scan/library mutation.
+- Tests: backend preservation/no-op/clear/stale/blocked/missing/external-byte conflict/asset bytes/untracked-ID; hook revision/commit/failure/eligibility/serialization/unmount; UI save/cancel/clear/exact text/error/missing/blocked/draft reset/max length; native invoke ID-only.
+- Final gates (2026-10-15): Vitest 258/258 (15 files), TypeScript, production build, Rust 94 pass / 1 ignored, strict Clippy and Rust fmt pass. See terminal run evidence in current session; no commits or pushes.
