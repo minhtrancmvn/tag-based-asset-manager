@@ -469,10 +469,12 @@ describe("scanned library UI", () => {
   it("shows library identity and root path only in the sidebar", () => {
     render(<App />);
     const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
-    expect(within(sidebar).getByRole("combobox", { name: "Active library" })).toBeTruthy();
-    expect(within(sidebar).getByRole("option", { name: "Workshop" })).toBeTruthy();
+    const picker = within(sidebar).getByRole("combobox", { name: "Active library" });
+    expect(picker.textContent).toContain("Workshop");
+    expect(within(picker).getByText(library.rootPath)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
     expect(screen.getAllByText(library.rootPath)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Local app; no account needed" })).toBeNull();
     const summary = screen.getByLabelText("Library summary");
     expect(within(summary).getByText("ASSETS")).toBeTruthy();
     expect(within(summary).getByText("LAST SCAN")).toBeTruthy();
@@ -506,7 +508,7 @@ describe("scanned library UI", () => {
     expect(screen.getByText("Scan stopped")).toBeTruthy();
     expect(screen.queryByText(/This folder is empty/)).toBeNull();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose library folder" }).disabled).toBe(false);
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" }).disabled).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" }).disabled).toBe(false);
     expect(screen.queryByRole("button", { name: "Stop scanning" })).toBeNull();
   });
 
@@ -516,7 +518,7 @@ describe("scanned library UI", () => {
     expect(screen.getByText("Workshop", { selector: ".collapsed-library-context" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
-    expect(within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("option", { name: "Workshop" })).toBeTruthy();
+    expect(within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("combobox", { name: "Active library" }).textContent).toContain("Workshop");
   });
   it("shows actionable first-run state without mock data", () => {
     setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });
@@ -548,11 +550,12 @@ describe("scanned library UI", () => {
 
   it("lists registered libraries and activates selected library", () => {
     render(<App />);
-    const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" });
-    expect(within(picker).getByRole("option", { name: "Workshop" })).toBeTruthy();
-    expect(within(picker).getByRole("option", { name: "Archive" })).toBeTruthy();
-    fireEvent.change(picker, { target: { value: secondLibrary.id } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Active library" }));
+    const libraries = screen.getByRole("listbox", { name: "Libraries" });
+    expect(within(libraries).getByRole("option", { name: "Workshop" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(libraries).getByRole("option", { name: "Archive" }));
     expect(actions.activateLibrary).toHaveBeenCalledWith(secondLibrary.id);
+    expect(screen.queryByRole("listbox", { name: "Libraries" })).toBeNull();
     expect(screen.getAllByText(library.rootPath).length).toBeGreaterThan(0);
     expect(screen.getByText("2", { selector: ".summary-strip strong" })).toBeTruthy();
   });
@@ -560,10 +563,10 @@ describe("scanned library UI", () => {
   it("allows activating a remaining library when no library is active", () => {
     setLibraryResult({ state: { libraries: [secondLibrary], activeLibraryId: null }, library: null, assets: [] });
     render(<App />);
-    const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" });
-    expect(within(picker).getByRole("option", { name: "Choose a library" })).toBeTruthy();
-    expect(picker.value).toBe("");
-    fireEvent.change(picker, { target: { value: secondLibrary.id } });
+    const picker = screen.getByRole("combobox", { name: "Active library" });
+    expect(picker.textContent).toContain("Choose a library");
+    fireEvent.click(picker);
+    fireEvent.click(screen.getByRole("option", { name: "Archive" }));
     expect(actions.activateLibrary).toHaveBeenCalledWith(secondLibrary.id);
   });
 
@@ -890,7 +893,7 @@ describe("scanned library UI", () => {
     fireEvent.click(assetRows()[1], { metaKey: true });
     expect((screen.getByRole("button", { name: "Edit tags in bulk" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /^Rescan$/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "Active library" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Active library" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getAllByRole("combobox", { name: "Add tag" })[0] as HTMLInputElement).disabled).toBe(true);
     cleanup();
     setLibraryResult({ savingSearch: true });

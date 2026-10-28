@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
-  ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, CircleAlert,
+  ArrowDown, ArrowUp, ChevronLeft, ChevronRight, CircleAlert,
   Columns3, FileArchive, FileBox, FileImage, FileText, Folder,
   FolderOpen, LayoutList, PanelRightClose, PanelRightOpen,
   Plus, RotateCw, Search, SlidersHorizontal, Tag, X, Copy, ExternalLink, FolderSearch, Download, ShieldCheck, Wrench, Trash2,
@@ -17,6 +17,7 @@ import { SavedSearchDialog } from "./components/SavedSearchDialog";
 import { DeleteAssetsDialog } from "./components/DeleteAssetsDialog";
 import { AssetPreview } from "./components/AssetPreview";
 import { ThemeSettings } from "./components/ThemeSettings";
+import { LibraryPicker } from "./components/LibraryPicker";
 import { themeCssVariables } from "./themes";
 import "./App.css";
 
@@ -456,7 +457,6 @@ function App() {
     }}>
       <aside className={`sidebar ${sidebarOpen ? "" : "sidebar-collapsed"}`} aria-label="Library navigation">
         <div className="brand-row">
-          <div className="brand-mark" aria-hidden="true"><span className="mark-line mark-one" /><span className="mark-line mark-two" /><span className="mark-line mark-three" /></div>
           {sidebarOpen && <div className="brand-copy"><strong>TAG-BASED</strong><span>ASSET MANAGER</span></div>}
           <button className="icon-button sidebar-toggle" title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} onClick={() => setSidebarOpen(!sidebarOpen)} type="button">
             {sidebarOpen ? <ChevronLeft size={17} /> : <ChevronRight size={17} />}
@@ -465,16 +465,7 @@ function App() {
         {sidebarOpen ? <>
           <div className="sidebar-scroll">
             <div className="library-heading">LIBRARY <span className="demo-pill">LOCAL</span></div>
-            <label className="library-picker-label" htmlFor="library-picker">Active library</label>
-            <div className="library-picker" title={library?.rootPath ?? "No library selected"}>
-              <div className="library-avatar"><FolderOpen size={18} strokeWidth={1.7} /></div>
-              <select id="library-picker" aria-label="Active library" value={state.activeLibraryId ?? ""} disabled={!state.libraries.length || busy} onChange={(event) => { if (event.target.value) void activateLibrary(event.target.value); }}>
-                {!state.activeLibraryId && <option value="">{state.libraries.length ? "Choose a library" : "No libraries"}</option>}
-                {state.libraries.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
-              </select>
-              <ChevronDown size={15} aria-hidden="true" />
-            </div>
-            {library && <div className="library-root" title={library.rootPath}>{library.rootPath}</div>}
+            <LibraryPicker libraries={state.libraries} activeLibraryId={state.activeLibraryId} disabled={busy} onActivate={(libraryId) => void activateLibrary(libraryId)} />
             <div className="nav-section-label">BROWSE</div>
             {library && <nav className="folder-breadcrumbs" aria-label="Folder path"><button type="button" onClick={() => navigateFolder("")} aria-current={!currentFolder ? "location" : undefined}>Library</button>{breadcrumbs.map((crumb) => <span key={crumb.path} className="breadcrumb-segment"><span aria-hidden="true">/</span><button type="button" onClick={() => navigateFolder(crumb.path)} aria-current={crumb.path === currentFolder ? "location" : undefined}>{crumb.name}</button></span>)}</nav>}
             <nav className="nav-list" aria-label="Catalog views">
@@ -504,7 +495,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           {!sidebarOpen && <span className="collapsed-library-context" title={library?.rootPath}>{library?.name ?? "No library selected"}</span>}
-          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span><button type="button" className="avatar-button" title="Local app; no account needed" aria-label="Local app; no account needed">TA</button></div>
+          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span></div>
         </header>
 
         <div className="page-content">
