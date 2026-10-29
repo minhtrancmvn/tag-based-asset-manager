@@ -229,7 +229,9 @@ jobs:
           (cd release && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
           notes="Automated unsigned prerelease built from \`$TARGET\` after Windows checks passed on \`$TESTED_SHA\`.
 
-          macOS packages (Apple Silicon) have no Developer ID signing or notarization, and the Windows x64 installer is unsigned; platform warnings may block installation. Verify downloads against \`SHA256SUMS.txt\`."
+          macOS packages (Apple Silicon) have no Developer ID signing or notarization, and the Windows x64 installer is unsigned; platform warnings may block installation. Verify downloads against \`SHA256SUMS.txt\`.
+
+          [Code signing policy](https://github.com/$GITHUB_REPOSITORY#code-signing-policy) · [MIT License](https://github.com/$GITHUB_REPOSITORY/blob/$TARGET/LICENSE)"
           gh release create "v$VERSION" release/* \
             --target "$TARGET" \
             --title "v$VERSION — unsigned preview builds" \
