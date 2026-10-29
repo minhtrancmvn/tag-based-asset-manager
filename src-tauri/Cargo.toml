@@ -1,6 +1,6 @@
 [package]
 name = "tag-based-asset-manager"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local-first desktop catalog for tagged files and folders"
 authors = []
 edition = "2021"
