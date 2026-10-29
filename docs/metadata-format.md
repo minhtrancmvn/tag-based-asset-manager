@@ -72,6 +72,8 @@ Scan marks a child entry `missing` when child no longer exists. Do not delete en
 
 Initial reconciliation: user selects existing regular file in same directory, reviews confirmation, then app transfers missing entry's UUID, tags, notes and unknown fields to chosen basename. Preserve asset bytes/paths. Reject targets already owning metadata—even zero-tag identity—rather than replacing it. Fresh validation checks missing source, revision, duplicate UUIDs, malformed/unreadable manifests and path safety before single atomic sidecar edit. Source entry removed only as part of explicitly confirmed transfer; all unrelated stale entries preserved. No automatic matching or hashing.
 
+Explicit removal: when the file was deleted on purpose, the user can remove one missing file entry after a confirmation that names its tags and notes. Fresh validation checks the row is still missing with the same revision, the file has not reappeared, and the owning manifest is valid and inside the root. Then a single atomic sidecar edit drops only that key; other entries, unknown fields, the sidecar file itself and all asset bytes are preserved. Scans still never remove entries. A refresh failure after the write returns committed rows with a visible "Missing entry removed; library refresh failed" issue.
+
 After durable reconnect, fresh scan refreshes rows. If refresh fails, report committed transfer plus visible refresh issue rather than pretending nothing was saved. App-local settings persistence is not required after commit. Later Rescan rebuilds snapshot from filesystem/manifests.
 
 ## Fixture library

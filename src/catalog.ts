@@ -12,12 +12,55 @@ export function tagGroup(tag: string): string {
 
 export function parseQuery(input: string): CatalogQuery {
   const result: CatalogQuery = { requiredTags: [], excludedTags: [], text: [] };
-  const tokens = input.match(/-?"[^"]*"|-?\S+/g) ?? [];
+  const tokens: string[] = [];
+  const words = /\S+/g;
+  const lastQuoteEnd = Math.max(input.lastIndexOf('"'), input.lastIndexOf("”"));
+  let word: RegExpExecArray | null;
+  while ((word = words.exec(input))) {
+    const start = word.index;
+    const quoteStart = start + (input[start] === "-" ? 1 : 0);
+    let end = start + word[0].length;
+    if (quoteStart < lastQuoteEnd && (input[quoteStart] === '"' || input[quoteStart] === "“")) {
+      const asciiClose = input[quoteStart] === '"' ? input.indexOf('"', quoteStart + 1) : -1;
+      let pairedClose = input.indexOf("”", quoteStart + 1);
+      let close = -1;
+      let smartClose = -1;
+      let smartDepth = 0;
+      for (let index = quoteStart + 1; index < input.length; index++) {
+        const character = input[index];
+        if (character === '"') {
+          const startsPhrase = /\s/.test(input[index - 1]) && /\S/.test(input[index + 1] ?? "");
+          close = smartClose !== -1 && startsPhrase ? smartClose : index;
+          break;
+        }
+        if (character === "“") {
+          if (pairedClose !== -1 && pairedClose <= index) pairedClose = input.indexOf("”", index + 1);
+          if (smartClose !== -1 && /\s/.test(input[index - 1]) && (asciiClose === -1 || pairedClose === -1 || pairedClose > asciiClose)) {
+            close = smartClose;
+            break;
+          }
+          smartDepth++;
+        } else if (character === "”") {
+          if (input[quoteStart] === "“") {
+            close = index;
+            break;
+          }
+          // Paired smart quotes stay literal inside ASCII phrases.
+          if (smartDepth > 0) smartDepth--;
+          else if (smartClose === -1) smartClose = index;
+        }
+      }
+      if (close === -1) close = smartClose;
+      if (close !== -1) end = close + 1;
+    }
+    tokens.push(input.slice(start, end));
+    words.lastIndex = end;
+  }
   for (const token of tokens) {
-    if (token.startsWith('"') && token.endsWith('"')) {
+    if (/^["“]/.test(token) && /["”]$/.test(token)) {
       const phrase = token.slice(1, -1).trim().toLowerCase();
       if (phrase) result.text.push(phrase);
-    } else if (token.startsWith('-"') && token.endsWith('"')) {
+    } else if (/^-["“]/.test(token) && /["”]$/.test(token)) {
       // Negative text search is not part of the query language.
       result.text.push(token.toLowerCase());
     } else if (token.startsWith("-")) {

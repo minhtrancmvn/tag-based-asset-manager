@@ -22,6 +22,7 @@ export interface LibraryClient {
   exportMetadata: (libraryId: string) => Promise<ExportResult | null>;
   getReconnectTargets: (libraryId: string, assetId: string, expectedRevision: string) => Promise<Asset[]>;
   reconnectAsset: (libraryId: string, assetId: string, expectedRevision: string, targetAssetId: string) => Promise<ScanResult>;
+  removeMissingEntry: (libraryId: string, assetId: string, expectedRevision: string) => Promise<ScanResult>;
 }
 
 export function toAppError(value: unknown): AppError {
@@ -52,6 +53,7 @@ export const nativeClient: LibraryClient = {
   exportMetadata: (libraryId) => invoke<ExportResult | null>("export_metadata", { libraryId }),
   getReconnectTargets: (libraryId, assetId, expectedRevision) => invoke<Asset[]>("reconnect_targets", { libraryId, assetId, expectedRevision }),
   reconnectAsset: (libraryId, assetId, expectedRevision, targetAssetId) => invoke<ScanResult>("reconnect_asset", { libraryId, assetId, expectedRevision, targetAssetId }),
+  removeMissingEntry: (libraryId, assetId, expectedRevision) => invoke<ScanResult>("remove_missing_entry", { libraryId, assetId, expectedRevision }),
   scan: (libraryId, scanId, onProgress) => {
     const channel = new Channel<ScanProgress>();
     channel.onmessage = onProgress;

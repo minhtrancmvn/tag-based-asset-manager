@@ -1,6 +1,7 @@
 use super::milestone5::{
     asset_action_with_dispatch, export_with_picker, reconnect_asset_domain,
-    reconnect_targets_domain, validate_metadata_domain,
+    reconnect_targets_domain, remove_missing_entry_domain, remove_missing_with_writer,
+    validate_metadata_domain,
 };
 use super::*;
 use tempfile::tempdir;
@@ -882,4 +883,191 @@ fn scan_reports_conflict_copies_without_listing_or_changing_them() {
         vec![".", "model.stl"]
     );
     assert_eq!(fs::read(conflict).unwrap(), b"{broken conflict");
+}
+
+fn removal_setup(root: &Path, state: &BackendState) -> (Asset, manifest::Entry) {
+    let missing = missing_setup(root, state);
+    fs::write(root.join("kept.stl"), b"kept bytes").unwrap();
+    let manifest::ReadManifest::Valid { mut manifest, .. } = manifest::read(root) else {
+        panic!("Expected valid manifest");
+    };
+    let mut kept = entry();
+    kept.id = Uuid::new_v4().to_string();
+    kept.tags = vec!["keep:me".into()];
+    manifest.items.insert("kept.stl".into(), kept.clone());
+    let mut other_missing = entry();
+    other_missing.id = Uuid::new_v4().to_string();
+    manifest
+        .items
+        .insert("other-missing.stl".into(), other_missing);
+    fs::write(
+        root.join(manifest::MANIFEST_NAME),
+        manifest.serialize().unwrap(),
+    )
+    .unwrap();
+    let missing = scan(root, state)
+        .assets
+        .into_iter()
+        .find(|asset| asset.id == missing.id)
+        .unwrap();
+    (missing, kept)
+}
+
+fn missing_issue(result: &ScanResult, path: &str) -> bool {
+    result
+        .issues
+        .iter()
+        .any(|issue| issue.message == "Metadata reference is missing" && issue.path == path)
+}
+
+#[test]
+fn removing_missing_entry_drops_only_that_key_and_preserves_everything_else() {
+    let (_temporary, root, state) = library();
+    let (missing, kept) = removal_setup(&root, &state);
+    let replacement = fs::read(root.join("猫 replacement.stl")).unwrap();
+
+    let result =
+        remove_missing_entry_domain(&state, "library", &missing.id, &missing.metadata_revision)
+            .unwrap();
+
+    let manifest::ReadManifest::Valid { manifest, .. } = manifest::read(&root) else {
+        panic!("Expected valid manifest after removal");
+    };
+    assert!(!manifest.items.contains_key("gone.stl"));
+    assert_eq!(manifest.items.get("kept.stl"), Some(&kept));
+    assert!(manifest.items.contains_key("other-missing.stl"));
+    assert_eq!(manifest.extra.get("unknown"), Some(&serde_json::json!(42)));
+    assert_eq!(
+        fs::read(root.join("猫 replacement.stl")).unwrap(),
+        replacement
+    );
+    assert_eq!(fs::read(root.join("kept.stl")).unwrap(), b"kept bytes");
+    assert!(result.assets.iter().all(|asset| asset.id != missing.id));
+    assert!(!missing_issue(&result, "./gone.stl"));
+    assert!(missing_issue(&result, "./other-missing.stl"));
+    // The published snapshot no longer offers the removed row for repair.
+    assert!(remove_missing_entry_domain(
+        &state,
+        "library",
+        &missing.id,
+        &missing.metadata_revision
+    )
+    .is_err());
+}
+
+#[test]
+fn removal_rejects_stale_revision_returned_file_and_non_missing_rows_without_writing() {
+    let (_temporary, root, state) = library();
+    let (missing, _) = removal_setup(&root, &state);
+    let manifest_path = root.join(manifest::MANIFEST_NAME);
+    let before = fs::read(&manifest_path).unwrap();
+
+    let stale = remove_missing_entry_domain(&state, "library", &missing.id, "stale").unwrap_err();
+    assert_eq!(
+        stale.message,
+        "Missing metadata revision changed; rescan before removing it"
+    );
+    let kept = remove_missing_entry_domain(&state, "library", "path:kept.stl", "any").unwrap_err();
+    assert_eq!(
+        kept.message,
+        "Removing a missing entry requires valid missing metadata from latest scan"
+    );
+    fs::write(root.join("gone.stl"), b"back again").unwrap();
+    let returned =
+        remove_missing_entry_domain(&state, "library", &missing.id, &missing.metadata_revision)
+            .unwrap_err();
+    assert_eq!(
+        returned.message,
+        "Source exists again; rescan before removing it"
+    );
+    assert_eq!(fs::read(&manifest_path).unwrap(), before);
+}
+
+#[test]
+fn removal_write_failure_preserves_sidecar_bytes() {
+    let (_temporary, root, state) = library();
+    let (missing, _) = removal_setup(&root, &state);
+    let manifest_path = root.join(manifest::MANIFEST_NAME);
+    let before = fs::read(&manifest_path).unwrap();
+    let error = remove_missing_with_writer(
+        &state,
+        "library",
+        &missing.id,
+        &missing.metadata_revision,
+        |_, _, _| Err("disk full".into()),
+    )
+    .unwrap_err();
+    assert_eq!(error.message, "disk full");
+    assert_eq!(fs::read(&manifest_path).unwrap(), before);
+}
+
+#[test]
+fn nested_removal_refresh_warning_stays_in_affected_folder() {
+    let (_temporary, root, state) = library();
+    let owner = root.join("Models/Parts");
+    fs::create_dir_all(&owner).unwrap();
+    let mut metadata = manifest::Manifest::empty();
+    metadata.items.insert("gone.stl".into(), entry());
+    fs::write(
+        owner.join(manifest::MANIFEST_NAME),
+        metadata.serialize().unwrap(),
+    )
+    .unwrap();
+    let missing = scan(&root, &state)
+        .assets
+        .into_iter()
+        .find(|asset| asset.relative_path == "Models/Parts/gone.stl")
+        .unwrap();
+    let moved = root.with_file_name("temporarily-offline");
+    let result = remove_missing_with_writer(
+        &state,
+        "library",
+        &missing.id,
+        &missing.metadata_revision,
+        |path, expected, bytes| {
+            manifest::write_atomic(path, expected, bytes)?;
+            fs::rename(&root, &moved).map_err(|error| error.to_string())
+        },
+    )
+    .unwrap();
+    fs::rename(&moved, &root).unwrap();
+    let warning = result
+        .issues
+        .iter()
+        .find(|issue| issue.message == "Missing entry removed; library refresh failed")
+        .unwrap();
+    assert_eq!(
+        Path::new(&warning.path).parent(),
+        Some(Path::new("Models/Parts"))
+    );
+}
+
+#[test]
+fn removal_refresh_failure_returns_committed_rows_with_visible_issue() {
+    let (_temporary, root, state) = library();
+    let (missing, _) = removal_setup(&root, &state);
+    let moved = root.with_file_name("temporarily-offline");
+    let result = remove_missing_with_writer(
+        &state,
+        "library",
+        &missing.id,
+        &missing.metadata_revision,
+        |path, expected, bytes| {
+            manifest::write_atomic(path, expected, bytes)?;
+            fs::rename(&root, &moved).map_err(|error| error.to_string())
+        },
+    )
+    .unwrap();
+    fs::rename(&moved, &root).unwrap();
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| issue.message == "Missing entry removed; library refresh failed"));
+    assert!(result.assets.iter().all(|asset| asset.id != missing.id));
+    assert!(!missing_issue(&result, "./gone.stl"));
+    assert!(missing_issue(&result, "./other-missing.stl"));
+    let manifest::ReadManifest::Valid { manifest, .. } = manifest::read(&root) else {
+        panic!("Expected valid manifest");
+    };
+    assert!(!manifest.items.contains_key("gone.stl"));
 }

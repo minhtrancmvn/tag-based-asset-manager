@@ -9,6 +9,60 @@ describe("query parsing", () => {
   it("uses quoted phrases for case-insensitive filename search", () => {
     expect(parseQuery('"Flexi Dragon"')).toEqual({ requiredTags: [], excludedTags: [], text: ["flexi dragon"] });
   });
+  it("uses smart double quotes for filename search", () => {
+    expect(parseQuery("“Flexi Dragon”")).toEqual({ requiredTags: [], excludedTags: [], text: ["flexi dragon"] });
+  });
+  it("uses a smart opening quote with an ASCII closing quote", () => {
+    expect(parseQuery('“Flexi Dragon"')).toEqual({ requiredTags: [], excludedTags: [], text: ["flexi dragon"] });
+  });
+  it("uses an ASCII opening quote with a smart closing quote", () => {
+    expect(parseQuery('"Flexi Dragon”')).toEqual({ requiredTags: [], excludedTags: [], text: ["flexi dragon"] });
+  });
+  it("keeps tags and exclusions separate from smart-quoted phrases", () => {
+    expect(parseQuery("category:animal “Flexi Dragon” -status:printed")).toEqual({ requiredTags: ["category:animal"], excludedTags: ["status:printed"], text: ["flexi dragon"] });
+  });
+  it("keeps consecutive mixed-quoted phrases separate", () => {
+    expect(parseQuery('"Flexi Dragon” "Fox Pendant”')).toEqual({ requiredTags: [], excludedTags: [], text: ["flexi dragon", "fox pendant"] });
+  });
+  it("keeps consecutive phrases separate when the next opening quote is smart", () => {
+    expect(parseQuery('"Flexi Dragon” “Fox Pendant"')).toEqual({ requiredTags: [], excludedTags: [], text: ["flexi dragon", "fox pendant"] });
+  });
+  it("keeps tags between mixed-quoted phrases separate", () => {
+    expect(parseQuery('"Flexi Dragon” favorite -status:printed “Fox Pendant"')).toEqual({ requiredTags: ["favorite"], excludedTags: ["status:printed"], text: ["flexi dragon", "fox pendant"] });
+  });
+  it("preserves smart quotes inside an ASCII-quoted filename", () => {
+    expect(parseQuery('"The “Fox” Model"')).toEqual({ requiredTags: [], excludedTags: [], text: ["the “fox” model"] });
+  });
+  it("preserves multiple smart-quoted names inside an ASCII-quoted filename", () => {
+    expect(parseQuery('"The “Fox” and “Dog” Model"')).toEqual({ requiredTags: [], excludedTags: [], text: ["the “fox” and “dog” model"] });
+  });
+  it("preserves closing punctuation before paired smart quotes in an ASCII phrase", () => {
+    expect(parseQuery('"3” “Fox” Model"')).toEqual({ requiredTags: [], excludedTags: [], text: ["3” “fox” model"] });
+  });
+  it("bounds work for many unmatched smart opening quotes", () => {
+    const now = performance.now();
+    const parsed = parseQuery("“a ".repeat(30000));
+    expect(parsed.requiredTags).toHaveLength(30000);
+    expect(performance.now() - now).toBeLessThan(500);
+  });
+  it("preserves a literal smart opening quote inside an ASCII-quoted filename", () => {
+    expect(parseQuery('"The “Fox Model"')).toEqual({ requiredTags: [], excludedTags: [], text: ["the “fox model"] });
+  });
+  it("preserves a literal smart closing quote inside an ASCII-quoted filename", () => {
+    expect(parseQuery('"Size 3” Model"')).toEqual({ requiredTags: [], excludedTags: [], text: ["size 3” model"] });
+  });
+  it("preserves an ASCII phrase adjacent to a tag", () => {
+    expect(parseQuery('"Flexi Dragon"favorite')).toEqual({ requiredTags: ["favorite"], excludedTags: [], text: ["flexi dragon"] });
+  });
+  it("preserves literal smart punctuation in an ASCII phrase adjacent to a tag", () => {
+    expect(parseQuery('"Size 3” Model"favorite')).toEqual({ requiredTags: ["favorite"], excludedTags: [], text: ["size 3” model"] });
+  });
+  it("preserves smart punctuation inside unquoted tags", () => {
+    expect(parseQuery("size:3” owner:artist’s -label:6”")).toEqual({ requiredTags: ["size:3”", "owner:artist’s"], excludedTags: ["label:6”"], text: [] });
+  });
+  it("does not introduce negative text search for smart quotes", () => {
+    expect(parseQuery("-“Flexi Dragon”")).toEqual({ requiredTags: [], excludedTags: [], text: ["-“flexi dragon”"] });
+  });
   it("trims whitespace and normalizes case", () => {
     expect(parseQuery("  CATEGORY:Animal   -STATUS:Printed  ")).toEqual({ requiredTags: ["category:animal"], excludedTags: ["status:printed"], text: [] });
   });
@@ -28,6 +82,14 @@ describe("mock catalog filtering", () => {
   it("ANY requires at least one required tag but still excludes NOT tags", () => {
     const query = parseQuery("category:animal theme:fantasy -status:printed");
     expect(mockAssets.filter((asset) => matchesAsset(asset, query, "all", "any", "file")).map((asset) => asset.id)).toEqual(["a5", "a6", "a8", "a12", "a15", "a16"]);
+  });
+  it("ANY keeps a smart-quoted phrase required", () => {
+    const query = parseQuery('category:animal theme:fantasy “Fox Pendant" -status:printed');
+    expect(mockAssets.filter((asset) => matchesAsset(asset, query, "all", "any", "file")).map((asset) => asset.id)).toEqual(["a6"]);
+  });
+  it("ANY rejects nonmatching smart-quoted text despite a matching tag", () => {
+    const query = parseQuery('category:animal “Missing Phrase"');
+    expect(mockAssets.filter((asset) => matchesAsset(asset, query, "all", "any", "file")).map((asset) => asset.id)).toEqual([]);
   });
   it("ANY with no required tags matches all kinds and keeps text required", () => {
     const query = parseQuery('"animals" -status:printed');

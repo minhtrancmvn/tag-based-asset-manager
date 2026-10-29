@@ -19,6 +19,14 @@ function renderPicker(overrides: Partial<Parameters<typeof LibraryPicker>[0]> = 
 }
 
 describe("LibraryPicker", () => {
+  it("distinguishes duplicate library names by their paths in option names", () => {
+    const { trigger } = renderPicker({ libraries: [libraries[0], { ...libraries[1], name: "Workshop" }] });
+    expect(screen.getByRole("combobox", { name: "Active library", description: "Workshop /Users/me/Workshop" })).toBe(trigger);
+    fireEvent.click(trigger);
+    expect(screen.getByRole("option", { name: "Workshop /Users/me/Workshop" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("option", { name: "Workshop /Users/me/Archive" }).getAttribute("aria-selected")).toBe("false");
+  });
+
   it("shows the active library name and path inside the closed box", () => {
     const { trigger } = renderPicker();
     expect(trigger.textContent).toContain("Workshop");
@@ -31,8 +39,8 @@ describe("LibraryPicker", () => {
     const { trigger, onActivate } = renderPicker();
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("option", { name: "Workshop" }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByRole("option", { name: "Prints" }));
+    expect(screen.getByRole("option", { name: "Workshop /Users/me/Workshop" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: "Prints /Users/me/Prints" }));
     expect(onActivate).toHaveBeenCalledWith("c");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(document.activeElement).toBe(trigger);
@@ -41,7 +49,7 @@ describe("LibraryPicker", () => {
   it("choosing the already active library does not reactivate it", () => {
     const { trigger, onActivate } = renderPicker();
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("option", { name: "Workshop" }));
+    fireEvent.click(screen.getByRole("option", { name: "Workshop /Users/me/Workshop" }));
     expect(onActivate).not.toHaveBeenCalled();
   });
 
@@ -52,13 +60,13 @@ describe("LibraryPicker", () => {
     const listbox = screen.getByRole("listbox", { name: "Libraries" });
     expect(trigger.getAttribute("aria-controls")).toBe(listbox.id);
     const activeOption = () => document.getElementById(trigger.getAttribute("aria-activedescendant") ?? "");
-    expect(activeOption()?.getAttribute("aria-label")).toBe("Workshop");
+    expect(activeOption()?.getAttribute("aria-label")).toBe("Workshop /Users/me/Workshop");
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    expect(activeOption()?.getAttribute("aria-label")).toBe("Archive");
+    expect(activeOption()?.getAttribute("aria-label")).toBe("Archive /Users/me/Archive");
     fireEvent.keyDown(trigger, { key: "End" });
-    expect(activeOption()?.getAttribute("aria-label")).toBe("Prints");
+    expect(activeOption()?.getAttribute("aria-label")).toBe("Prints /Users/me/Prints");
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    expect(activeOption()?.getAttribute("aria-label")).toBe("Prints");
+    expect(activeOption()?.getAttribute("aria-label")).toBe("Prints /Users/me/Prints");
     fireEvent.keyDown(trigger, { key: "Home" });
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
     fireEvent.keyDown(trigger, { key: "Enter" });

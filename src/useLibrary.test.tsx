@@ -28,6 +28,7 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
     exportMetadata: vi.fn().mockResolvedValue(null),
     getReconnectTargets: vi.fn().mockResolvedValue([]),
     reconnectAsset: vi.fn().mockResolvedValue({ ...scanResult, scanId: "repair" }),
+    removeMissingEntry: vi.fn().mockResolvedValue({ ...scanResult, scanId: "removal", assets: [] }),
     deleteAssets: vi.fn().mockResolvedValue({ completedIds: ["path:a.stl"], error: null }),
     previewAsset: vi.fn().mockResolvedValue({ kind: "text", content: "preview", mimeType: "text/plain", truncated: false, message: null }),
     ...overrides,
@@ -648,6 +649,23 @@ describe("native library lifecycle", () => {
     await act(async () => { expect(await result.current.reconnectAsset(source, result.current.assets[0])).toBe(true); });
     expect(api.reconnectAsset).toHaveBeenCalledWith("root1", "path:a.stl", "rev1", "path:a.stl");
     expect(result.current.validation).toBeNull();
+    expect(result.current.recoveryBusy).toBe(false);
+  });
+  it("applies confirmed missing-entry removal as fresh scan and only for valid missing metadata", async () => {
+    const api = client();
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(() => result.current.validateMetadata());
+    const present = result.current.assets[0];
+    await act(async () => { expect(await result.current.removeMissingEntry(present)).toBe(false); });
+    await act(async () => { expect(await result.current.removeMissingEntry({ ...present, status: "missing", metadataState: "blocked", metadataId: "uuid" })).toBe(false); });
+    expect(api.removeMissingEntry).not.toHaveBeenCalled();
+    const missing = { ...present, status: "missing" as const, metadataState: "valid" as const, metadataId: "uuid" };
+    await act(async () => { expect(await result.current.removeMissingEntry(missing)).toBe(true); });
+    expect(api.removeMissingEntry).toHaveBeenCalledWith("root1", "path:a.stl", "rev1");
+    expect(result.current.assets).toEqual([]);
+    expect(result.current.validation).toBeNull();
+    expect(result.current.state.libraries.find((item) => item.id === "root1")?.assetCount).toBe(0);
     expect(result.current.recoveryBusy).toBe(false);
   });
   it("holds other mutations while native operation is pending", async () => {
