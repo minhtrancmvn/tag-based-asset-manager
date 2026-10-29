@@ -40,6 +40,7 @@ const actions = {
   exportMetadata: vi.fn<() => Promise<boolean>>(),
   getReconnectTargets: vi.fn<(_: Asset) => Promise<Asset[] | null>>(),
   reconnectAsset: vi.fn<(_: Asset, __: Asset) => Promise<boolean>>(),
+  removeMissingEntry: vi.fn<(_: Asset) => Promise<boolean>>(),
   deleteAssets: vi.fn<(_: Asset[]) => Promise<boolean>>(),
   previewAsset: vi.fn<(_: Asset) => Promise<import("./types").PreviewResult | null>>(),
 };
@@ -100,6 +101,7 @@ function setLibraryResult(overrides: Partial<{
     exportResult: null,
     getReconnectTargets: actions.getReconnectTargets,
     reconnectAsset: actions.reconnectAsset,
+    removeMissingEntry: actions.removeMissingEntry,
     deleteAssets: actions.deleteAssets,
     previewAsset: actions.previewAsset,
     theme: "workshop",
@@ -115,6 +117,11 @@ function setLibraryResult(overrides: Partial<{
 
 function assetRows() {
   return within(screen.getByRole("table")).getAllByRole("row").slice(1);
+}
+
+function chooseFilter(label: string, option: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: label }));
+  fireEvent.click(screen.getByRole("option", { name: option }));
 }
 
 beforeEach(() => {
@@ -167,6 +174,20 @@ describe("scanned library UI", () => {
     expect(actions.setTheme).not.toHaveBeenCalled();
     expect(screen.getAllByRole("status").some((status) => status.textContent?.includes("Saving theme"))).toBe(true);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(true);
+  });
+
+  it("filters filename text entered with native smart quotes", () => {
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search assets and tags" }), { target: { value: '“Gear"' } });
+    expect(assetRows().map((row) => row.getAttribute("title"))).toEqual(["Gear.stl"]);
+  });
+
+  it("keeps smart-quoted text required in Any mode", () => {
+    setLibraryResult({ assets: [{ ...assets[0], tags: ["category:gear"] }, assets[1]] });
+    render(<App />);
+    chooseFilter("Required tag match", "Any tag");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search assets and tags" }), { target: { value: 'category:gear “Missing Phrase"' } });
+    expect(assetRows()).toEqual([]);
   });
 
   it("keeps folder, query, selection and applies committed theme tokens without unrelated actions", () => {
@@ -391,7 +412,7 @@ describe("scanned library UI", () => {
     const { rerender } = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Untagged/ }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Asset kind" }), { target: { value: "file" } });
+    chooseFilter("Asset kind", "Files");
     fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
     fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Path" }));
@@ -410,7 +431,7 @@ describe("scanned library UI", () => {
     rerender(<App />);
 
     expect(screen.getByRole("heading", { name: "Untagged" })).toBeTruthy();
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Asset kind" }).value).toBe("file");
+    expect(screen.getByRole("combobox", { name: "Asset kind" }).textContent).toBe("Files");
     expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
     expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
     expect(scroll.scrollTop).toBe(1200);
@@ -469,10 +490,12 @@ describe("scanned library UI", () => {
   it("shows library identity and root path only in the sidebar", () => {
     render(<App />);
     const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
-    expect(within(sidebar).getByRole("combobox", { name: "Active library" })).toBeTruthy();
-    expect(within(sidebar).getByRole("option", { name: "Workshop" })).toBeTruthy();
+    const picker = within(sidebar).getByRole("combobox", { name: "Active library" });
+    expect(picker.textContent).toContain("Workshop");
+    expect(within(picker).getByText(library.rootPath)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
     expect(screen.getAllByText(library.rootPath)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Local app; no account needed" })).toBeNull();
     const summary = screen.getByLabelText("Library summary");
     expect(within(summary).getByText("ASSETS")).toBeTruthy();
     expect(within(summary).getByText("LAST SCAN")).toBeTruthy();
@@ -505,8 +528,10 @@ describe("scanned library UI", () => {
     render(<App />);
     expect(screen.getByText("Scan stopped")).toBeTruthy();
     expect(screen.queryByText(/This folder is empty/)).toBeNull();
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose library folder" }).disabled).toBe(false);
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" }).disabled).toBe(false);
+    const picker = screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" });
+    expect(picker.disabled).toBe(false);
+    fireEvent.click(picker);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Add library folder…" }).disabled).toBe(false);
     expect(screen.queryByRole("button", { name: "Stop scanning" })).toBeNull();
   });
 
@@ -516,7 +541,7 @@ describe("scanned library UI", () => {
     expect(screen.getByText("Workshop", { selector: ".collapsed-library-context" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Color theme" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
-    expect(within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("option", { name: "Workshop" })).toBeTruthy();
+    expect(within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("combobox", { name: "Active library" }).textContent).toContain("Workshop");
   });
   it("shows actionable first-run state without mock data", () => {
     setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });
@@ -546,13 +571,60 @@ describe("scanned library UI", () => {
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose library folder" }).disabled).toBe(true);
   });
 
+  it("opens the native folder chooser from the library dropdown instead of a duplicate header button", () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "Choose library folder" })).toBeNull();
+    const picker = screen.getByRole("combobox", { name: "Active library" });
+    fireEvent.click(picker);
+    const add = within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("button", { name: "Add library folder…" });
+    expect(screen.queryByRole("option", { name: "Add library folder…" })).toBeNull();
+    fireEvent.click(add);
+    expect(actions.chooseLibrary).toHaveBeenCalledExactlyOnceWith();
+    expect(actions.activateLibrary).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Libraries" })).toBeNull();
+    expect(picker.textContent).toContain("Workshop");
+  });
+
+  it("offers adding a folder without a duplicate header when registered libraries have no active selection", () => {
+    setLibraryResult({ state: { libraries: [secondLibrary], activeLibraryId: null }, library: null, assets: [] });
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "Choose library folder" })).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Active library" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add library folder…" }));
+    expect(actions.chooseLibrary).toHaveBeenCalledExactlyOnceWith();
+    expect(actions.activateLibrary).not.toHaveBeenCalled();
+  });
+
+  it("disables the library chooser while a native operation is busy", () => {
+    const { rerender } = render(<App />);
+    const picker = screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" });
+    fireEvent.click(picker);
+    expect(screen.getByRole("button", { name: "Add library folder…" })).toBeTruthy();
+    setLibraryResult({ actionBusy: true });
+    rerender(<App />);
+    expect(picker.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Add library folder…" })).toBeNull();
+    expect(actions.chooseLibrary).not.toHaveBeenCalled();
+  });
+
+  it("disables the dropdown chooser outside the desktop app", () => {
+    setLibraryResult({ isDesktop: false });
+    render(<App />);
+    const picker = screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" });
+    expect(picker.disabled).toBe(true);
+    fireEvent.click(picker);
+    expect(screen.queryByRole("button", { name: "Add library folder…" })).toBeNull();
+    expect(actions.chooseLibrary).not.toHaveBeenCalled();
+  });
+
   it("lists registered libraries and activates selected library", () => {
     render(<App />);
-    const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" });
-    expect(within(picker).getByRole("option", { name: "Workshop" })).toBeTruthy();
-    expect(within(picker).getByRole("option", { name: "Archive" })).toBeTruthy();
-    fireEvent.change(picker, { target: { value: secondLibrary.id } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Active library" }));
+    const libraries = screen.getByRole("listbox", { name: "Libraries" });
+    expect(within(libraries).getByRole("option", { name: "Workshop /Users/test/Workshop" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(libraries).getByRole("option", { name: "Archive /Users/test/Archive" }));
     expect(actions.activateLibrary).toHaveBeenCalledWith(secondLibrary.id);
+    expect(screen.queryByRole("listbox", { name: "Libraries" })).toBeNull();
     expect(screen.getAllByText(library.rootPath).length).toBeGreaterThan(0);
     expect(screen.getByText("2", { selector: ".summary-strip strong" })).toBeTruthy();
   });
@@ -560,10 +632,10 @@ describe("scanned library UI", () => {
   it("allows activating a remaining library when no library is active", () => {
     setLibraryResult({ state: { libraries: [secondLibrary], activeLibraryId: null }, library: null, assets: [] });
     render(<App />);
-    const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "Active library" });
-    expect(within(picker).getByRole("option", { name: "Choose a library" })).toBeTruthy();
-    expect(picker.value).toBe("");
-    fireEvent.change(picker, { target: { value: secondLibrary.id } });
+    const picker = screen.getByRole("combobox", { name: "Active library" });
+    expect(picker.textContent).toContain("Choose a library");
+    fireEvent.click(picker);
+    fireEvent.click(screen.getByRole("option", { name: "Archive /Users/test/Archive" }));
     expect(actions.activateLibrary).toHaveBeenCalledWith(secondLibrary.id);
   });
 
@@ -624,13 +696,42 @@ describe("scanned library UI", () => {
     expect(actions.dismissError).toHaveBeenCalledOnce();
   });
 
-  it("lists unreadable scan issues separately from metadata status", () => {
+  it("keeps scan issues in one disclosure without a duplicate instructional banner", () => {
     setLibraryResult({ issues: [issue] });
     render(<App />);
-    expect(screen.getByText("1 issue need attention")).toBeTruthy();
-    expect(screen.getByText("Could not read directory")).toBeTruthy();
-    expect(screen.getByText("Permission denied")).toBeTruthy();
-    expect(screen.getByText(/Editing changes metadata only/)).toBeTruthy();
+    const summary = screen.getByText("Scan issues in this folder").closest("summary")!;
+    const disclosure = summary.parentElement as HTMLDetailsElement;
+    expect(summary.textContent).toContain("1 issue");
+    expect(disclosure.open).toBe(false);
+    expect(screen.queryByText(/issue.*need attention/)).toBeNull();
+    expect(screen.queryByText(/Tags and notes are stored in per-directory/)).toBeNull();
+    fireEvent.click(summary);
+    expect(disclosure.open).toBe(true);
+    expect(within(disclosure).getByText(issue.message)).toBeTruthy();
+    expect(within(disclosure).getByText(issue.details)).toBeTruthy();
+  });
+
+  it("keeps error paths inside collapsed technical details", () => {
+    const failure = { message: "Source exists again; rescan before removing it", path: "/Users/test/Workshop/Gear.stl", details: "Fresh source check rejected removal" };
+    setLibraryResult({ error: failure, issues: [issue] });
+    render(<App />);
+    const alert = screen.getByRole("alert");
+    expect(screen.getAllByText(failure.message)).toHaveLength(1);
+    const path = within(alert).getByText(failure.path);
+    const disclosure = path.closest("details")!;
+    expect(disclosure).not.toBeNull();
+    expect(disclosure.open).toBe(false);
+    fireEvent.click(within(alert).getByText("Technical details"));
+    expect(disclosure.open).toBe(true);
+    expect(within(disclosure).getByText(failure.details)).toBeTruthy();
+  });
+
+  it("offers technical details when an error has only a path", () => {
+    setLibraryResult({ error: { message: "Folder unavailable", path: "/Users/test/Workshop", details: null } });
+    render(<App />);
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText("/Users/test/Workshop").closest("details")).not.toBeNull();
+    expect(within(alert).getByText("Technical details")).toBeTruthy();
   });
 
   it("renders actual hook assets, filters, selection and summary counts", () => {
@@ -728,7 +829,7 @@ describe("scanned library UI", () => {
     expect(screen.getByText("Print slowly.")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Remove tag style:flexi" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "style:flexi" })).toHaveLength(2);
-    expect(screen.getByText(/asset files and paths stay untouched/i)).toBeTruthy();
+    expect(screen.queryByText(/Tags and notes are stored in per-directory/)).toBeNull();
   });
 
   it("edits notes with explicit Save and Cancel; empty Save clears optional notes", async () => {
@@ -851,20 +952,20 @@ describe("scanned library UI", () => {
     setLibraryResult({ assets: [first, second] });
     const { rerender } = render(<App />);
     fireEvent.change(screen.getByRole("textbox", { name: "Search assets and tags" }), { target: { value: "category:gear style:flexi" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Required tag match" }), { target: { value: "any" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Asset kind" }), { target: { value: "folder" } });
+    chooseFilter("Required tag match", "Any tag");
+    chooseFilter("Asset kind", "Folders");
     expect(assetRows()).toHaveLength(1);
     expect(within(assetRows()[0]).getByText("Models", { selector: ".folder-name" })).toBeTruthy();
     const storedSearch: import("./types").SavedSearch = { id: "saved-1", libraryId: secondLibrary.id, name: "Gear OR flexi folders", filters: { query: "category:gear style:flexi", view: "all", matchMode: "any", kind: "folder" } };
     setLibraryResult({ state: { ...libraryState, activeLibraryId: secondLibrary.id }, library: secondLibrary, assets: [], savedSearches: [storedSearch] });
     rerender(<App />);
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe("");
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Required tag match" }).value).toBe("all");
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Asset kind" }).value).toBe("all");
+    expect(screen.getByRole("combobox", { name: "Required tag match" }).textContent).toBe("All tags");
+    expect(screen.getByRole("combobox", { name: "Asset kind" }).textContent).toBe("Files & folders");
     fireEvent.click(screen.getByRole("button", { name: /Gear OR flexi folders/ }));
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe(storedSearch.filters.query);
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Required tag match" }).value).toBe("any");
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Asset kind" }).value).toBe("folder");
+    expect(screen.getByRole("combobox", { name: "Required tag match" }).textContent).toBe("Any tag");
+    expect(screen.getByRole("combobox", { name: "Asset kind" }).textContent).toBe("Folders");
   });
 
   it("opens bulk dialog with exact currently selected rows and confirms once", async () => {
@@ -890,7 +991,7 @@ describe("scanned library UI", () => {
     fireEvent.click(assetRows()[1], { metaKey: true });
     expect((screen.getByRole("button", { name: "Edit tags in bulk" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /^Rescan$/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "Active library" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Active library" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getAllByRole("combobox", { name: "Add tag" })[0] as HTMLInputElement).disabled).toBe(true);
     cleanup();
     setLibraryResult({ savingSearch: true });
@@ -905,7 +1006,7 @@ describe("scanned library UI", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Save search" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Search assets and tags" }), { target: { value: "category:gear" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Required tag match" }), { target: { value: "any" } });
+    chooseFilter("Required tag match", "Any tag");
     fireEvent.click(screen.getByRole("button", { name: "Manage saved searches" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Existing saved search" }), { target: { value: saved.id } });
     expect((screen.getByRole("button", { name: "Update search" }) as HTMLButtonElement).disabled).toBe(false);
@@ -937,6 +1038,7 @@ describe("scanned library UI", () => {
   it("disables file actions for missing assets and starts explicit metadata recovery", async () => {
     const missing: Asset = { ...assets[0], name: "Old Fox.stl", relativePath: "Old Fox.stl", status: "missing", metadataState: "valid", metadataId: "metadata-uuid", metadataRevision: "missing-revision", tags: ["theme:fox"], notes: "Keep supports." };
     actions.getReconnectTargets.mockResolvedValueOnce([assets[0]]);
+    actions.reconnectAsset.mockResolvedValueOnce(true);
     setLibraryResult({ assets: [missing] });
     render(<App />);
     fireEvent.contextMenu(assetRows()[0]);
@@ -949,6 +1051,8 @@ describe("scanned library UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review reconnect" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm reconnect" }));
     expect(actions.reconnectAsset).toHaveBeenCalledWith(missing, assets[0]);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reconnect metadata" })).toBeNull());
+    expect(screen.queryByText(/Could not reconnect/)).toBeNull();
   });
 
   it("deletes a confirmed row through the destructive dialog and not before", async () => {
@@ -1043,6 +1147,87 @@ describe("scanned library UI", () => {
     expect(screen.queryByRole("dialog", { name: "Reconnect metadata" })).toBeNull();
   });
 
+  it("removes a missing entry only after explicit confirmation", async () => {
+    const missing: Asset = { ...assets[0], name: "Old Fox.stl", relativePath: "Old Fox.stl", status: "missing", metadataState: "valid", metadataId: "metadata-uuid", metadataRevision: "missing-revision", tags: ["theme:fox"] };
+    actions.removeMissingEntry.mockResolvedValue(true);
+    setLibraryResult({ assets: [missing] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    expect(screen.queryByRole("button", { name: /Delete this item/ })).toBeNull();
+    expect(screen.getByText(/remove the entry if the file was deleted on purpose/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Remove missing entry/ }));
+    let dialog = await screen.findByRole("dialog", { name: "Remove entry for Old Fox.stl" });
+    expect(within(dialog).getByText(/No asset files are changed/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Remove entry for Old Fox.stl" })).toBeNull();
+    expect(actions.removeMissingEntry).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(assetRows()[0]);
+    fireEvent.click(within(screen.getByRole("menu", { name: "Actions for Old Fox.stl" })).getByRole("menuitem", { name: "Remove missing entry" }));
+    dialog = await screen.findByRole("dialog", { name: "Remove entry for Old Fox.stl" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove entry" }));
+    await waitFor(() => expect(actions.removeMissingEntry).toHaveBeenCalledWith(missing));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove entry for Old Fox.stl" })).toBeNull());
+  });
+
+  it.each(["Cancel", "Escape"])("returns focus to the missing row after context-menu removal %s", async (dismiss) => {
+    const missing: Asset = { ...assets[0], status: "missing", metadataState: "valid", metadataId: "metadata-uuid" };
+    setLibraryResult({ assets: [missing] });
+    render(<App />);
+    const row = assetRows()[0];
+    row.focus();
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove missing entry" }));
+    const dialog = await screen.findByRole("dialog");
+    if (dismiss === "Cancel") fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    else fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("shows removal failure once inside the dialog and retains it after Cancel", async () => {
+    const missing: Asset = { ...assets[0], status: "missing", metadataState: "valid", metadataId: "metadata-uuid" };
+    const failure = { message: "Source exists again; rescan before removing it", path: "/Users/test/Workshop/Gear.stl", details: "File returned after the last scan" };
+    actions.removeMissingEntry.mockResolvedValue(false);
+    setLibraryResult({ assets: [missing] });
+    const { rerender } = render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove missing entry" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove entry" }));
+    await waitFor(() => expect(actions.removeMissingEntry).toHaveBeenCalledWith(missing));
+    setLibraryResult({ assets: [missing], error: failure });
+    rerender(<App />);
+    await waitFor(() => expect(within(dialog).getByRole("alert").textContent).toContain(failure.message));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getAllByText(failure.message)).toHaveLength(1);
+    expect(within(dialog).queryByText(/Review the library error/)).toBeNull();
+    const details = within(dialog).getByText(failure.path).closest("details")!;
+    expect(details.open).toBe(false);
+    fireEvent.click(within(dialog).getByText("Technical details"));
+    expect(details.open).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain(failure.message);
+  });
+
+  it("clears an earlier operation error before opening removal confirmation", () => {
+    const missing: Asset = { ...assets[0], status: "missing", metadataState: "valid", metadataId: "metadata-uuid" };
+    setLibraryResult({ assets: [missing], error: { message: "Earlier operation failed", path: null, details: null } });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove missing entry" }));
+    expect(actions.dismissError).toHaveBeenCalledOnce();
+  });
+
+  it("keeps missing entry removal unavailable without valid metadata", () => {
+    const blocked: Asset = { ...assets[0], status: "missing", metadataState: "blocked", metadataId: "metadata-uuid", metadataRevision: "missing-revision" };
+    setLibraryResult({ assets: [blocked] });
+    render(<App />);
+    fireEvent.click(assetRows()[0]);
+    expect((screen.getByRole("button", { name: /Remove missing entry/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("keeps missing asset file actions, including path copies, disabled", () => {
     const missing = { ...assets[0], status: "missing" as const, metadataState: "valid" as const, metadataId: "metadata-uuid" };
     setLibraryResult({ assets: [missing] });
@@ -1061,6 +1246,23 @@ describe("scanned library UI", () => {
     render(<App />);
     expect(screen.getByText("Metadata validation passed")).toBeTruthy();
     expect(screen.getByText("No metadata integrity problems found.")).toBeTruthy();
+  });
+
+  it("fits the complete missing-entry menu inside the viewport", () => {
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { x: 0, y: 0, top: 0, left: 0, right: 224, bottom: this.classList.contains("asset-context-menu") ? 310 : 0, width: 224, height: this.classList.contains("asset-context-menu") ? 310 : 0, toJSON: () => ({}) };
+    });
+    try {
+      const missing: Asset = { ...assets[0], status: "missing", metadataState: "valid", metadataId: "metadata-uuid" };
+      setLibraryResult({ assets: [missing] });
+      render(<App />);
+      fireEvent.contextMenu(assetRows()[0], { clientX: window.innerWidth - 1, clientY: window.innerHeight - 1 });
+      const menu = screen.getByRole("menu");
+      expect(Number.parseFloat(menu.style.top) + 310).toBeLessThanOrEqual(window.innerHeight - 8);
+      expect(Number.parseFloat(menu.style.left) + 224).toBeLessThanOrEqual(window.innerWidth - 8);
+    } finally {
+      measure.mockRestore();
+    }
   });
 
   it("keeps portal context menu open on layout scroll and closes on user wheel", () => {

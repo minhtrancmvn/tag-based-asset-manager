@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LibraryClient } from "./native";
 import { nativeClient, toAppError } from "./native";
-import type { AppError, AppTheme, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, ScanIssue, SearchFilters, ValidationReport } from "./types";
+import type { AppError, AppTheme, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, ScanIssue, ScanResult, SearchFilters, ValidationReport } from "./types";
 
 const emptyState: LibraryState = { libraries: [], activeLibraryId: null };
 
@@ -326,20 +326,25 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     await runNativeOperation((libraryId) => client.getReconnectTargets(libraryId, asset.id, asset.metadataRevision!), (rows) => { choices = rows; return true; }, true);
     return choices;
   }, [client, runNativeOperation]);
+  const applyRepairScan = useCallback((result: ScanResult, libraryId: string) => {
+    if (result.libraryId !== libraryId) throw new Error("Repair response did not match active library.");
+    ++scanGeneration.current;
+    setAssets(result.assets);
+    setIssues(result.issues);
+    setValidation(null);
+    const next = { ...stateRef.current, libraries: stateRef.current.libraries.map((library) => library.id === libraryId ? { ...library, assetCount: result.assets.length, lastScanAt: result.scannedAt } : library) };
+    stateRef.current = next;
+    setState(next);
+    return true;
+  }, []);
   const reconnectAsset = useCallback(async (source: Asset, target: Asset) => {
     if (source.status !== "missing" || source.metadataState !== "valid" || !source.metadataRevision || !source.metadataId || target.status === "missing" || target.kind !== "file" || target.metadataId || target.metadataState === "blocked") return false;
-    return runNativeOperation((libraryId) => client.reconnectAsset(libraryId, source.id, source.metadataRevision!, target.id), (result, libraryId) => {
-      if (result.libraryId !== libraryId) throw new Error("Repair response did not match active library.");
-      ++scanGeneration.current;
-      setAssets(result.assets);
-      setIssues(result.issues);
-      setValidation(null);
-      const next = { ...stateRef.current, libraries: stateRef.current.libraries.map((library) => library.id === libraryId ? { ...library, assetCount: result.assets.length, lastScanAt: result.scannedAt } : library) };
-      stateRef.current = next;
-      setState(next);
-      return true;
-    }, true);
-  }, [client, runNativeOperation]);
+    return runNativeOperation((libraryId) => client.reconnectAsset(libraryId, source.id, source.metadataRevision!, target.id), applyRepairScan, true);
+  }, [client, runNativeOperation, applyRepairScan]);
+  const removeMissingEntry = useCallback(async (asset: Asset) => {
+    if (asset.status !== "missing" || asset.metadataState !== "valid" || !asset.metadataRevision || !asset.metadataId) return false;
+    return runNativeOperation((libraryId) => client.removeMissingEntry(libraryId, asset.id, asset.metadataRevision!), applyRepairScan, true);
+  }, [client, runNativeOperation, applyRepairScan]);
   const deleteAssets = useCallback(async (targets: Asset[]): Promise<boolean> => {
     const libraryId = stateRef.current.activeLibraryId;
     if (!client.isDesktop || !libraryId || operation.current || scanBusy.current || targets.length === 0) return false;
@@ -385,7 +390,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId, editNotes, editingNotesAssetId,
     bulkEditTags, bulkEditing, savedSearches: (state.savedSearches ?? []).filter((search) => search.libraryId === state.activeLibraryId),
     savingSearch, saveSearch, deleteSearch, savingTheme, setTheme, performAction, actionBusy,
-    validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, recoveryBusy,
+    validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, removeMissingEntry, recoveryBusy,
     deleteAssets, deleting, previewAsset,
     dismissError, isDesktop: client.isDesktop,
   };

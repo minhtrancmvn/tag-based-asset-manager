@@ -110,6 +110,12 @@ describe("native DTO bridge", () => {
       ["reconnect_asset", { libraryId: "root1", assetId: "path:gone.stl", expectedRevision: "rev1", targetAssetId: "path:renamed.stl" }],
     ]);
   });
+  it("binds missing-entry removal to the missing revision", async () => {
+    await nativeClient.removeMissingEntry("root1", "path:gone.stl", "rev1");
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["remove_missing_entry", { libraryId: "root1", assetId: "path:gone.stl", expectedRevision: "rev1" }],
+    ]);
+  });
   it("keeps structured error details", () => {
     expect(toAppError({ message: "Cannot read library", path: "/selected", details: "Permission denied" })).toEqual({ message: "Cannot read library", path: "/selected", details: "Permission denied" });
   });

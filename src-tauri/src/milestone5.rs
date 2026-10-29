@@ -182,12 +182,36 @@ struct MissingSource {
     bytes: Vec<u8>,
 }
 
+/// Explicit repairs of a missing entry; only the wording of their errors differs.
+#[derive(Clone, Copy)]
+pub(super) enum MissingRepair {
+    Reconnect,
+    Remove,
+}
+
+impl MissingRepair {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Reconnect => "Reconnect",
+            Self::Remove => "Removing a missing entry",
+        }
+    }
+
+    fn before(self) -> &'static str {
+        match self {
+            Self::Reconnect => "reconnecting",
+            Self::Remove => "removing it",
+        }
+    }
+}
+
 fn prepare_missing_source(
     inner: &Inner,
     root: &Path,
     library_id: &str,
     asset_id: &str,
     expected_revision: &str,
+    repair: MissingRepair,
 ) -> CommandResult<MissingSource> {
     let source = scanned_row(inner, root, library_id, asset_id)?;
     if source.status != "missing"
@@ -195,10 +219,18 @@ fn prepare_missing_source(
         || source.metadata_state != "valid"
         || source.metadata_id.is_none()
     {
-        return Err("Reconnect requires valid missing metadata from latest scan".into());
+        return Err(format!(
+            "{} requires valid missing metadata from latest scan",
+            repair.title()
+        )
+        .into());
     }
     if source.metadata_revision != expected_revision {
-        return Err("Missing metadata revision changed; rescan before reconnecting".into());
+        return Err(format!(
+            "Missing metadata revision changed; rescan before {}",
+            repair.before()
+        )
+        .into());
     }
     let path = asset_path(root, source)?;
     let owner = path
@@ -216,7 +248,7 @@ fn prepare_missing_source(
         }
         Ok(_) => {
             return Err(AppError::at_path(
-                "Source exists again; rescan before reconnecting",
+                format!("Source exists again; rescan before {}", repair.before()),
                 &path,
             ))
         }
@@ -237,15 +269,17 @@ fn prepare_missing_source(
         }
         manifest::ReadManifest::Missing => {
             return Err(AppError::at_path(
-                "Missing source manifest; rescan before reconnecting",
+                format!("Missing source manifest; rescan before {}", repair.before()),
                 &owner,
             ))
         }
     };
-    let entry = metadata
-        .items
-        .get(&key)
-        .ok_or_else(|| AppError::from("Missing entry changed; rescan before reconnecting"))?;
+    let entry = metadata.items.get(&key).ok_or_else(|| {
+        AppError::from(format!(
+            "Missing entry changed; rescan before {}",
+            repair.before()
+        ))
+    })?;
     let owner_relative = path_string(
         owner
             .strip_prefix(root)
@@ -255,7 +289,11 @@ fn prepare_missing_source(
     .unwrap_or_else(|| ".".into());
     let revision = manifest::metadata_revision(Some(entry), &key, "file", &owner_relative, "valid");
     if revision != expected_revision || source.metadata_id.as_deref() != Some(entry.id.as_str()) {
-        return Err("Missing metadata changed; rescan before reconnecting".into());
+        return Err(format!(
+            "Missing metadata changed; rescan before {}",
+            repair.before()
+        )
+        .into());
     }
     Ok(MissingSource {
         path,
@@ -267,29 +305,47 @@ fn prepare_missing_source(
     })
 }
 
+/// Fresh scan confirming the source row is still the same missing entry.
+fn fresh_missing_scan(
+    root: &Path,
+    library_id: &str,
+    source_id: &str,
+    expected_revision: &str,
+    repair: MissingRepair,
+) -> CommandResult<ScanResult> {
+    let result = scan_tree(root, library_id, &Uuid::new_v4().to_string(), |_| {})
+        .map_err(|error| AppError::scan(root, error))?;
+    let unchanged = result.assets.iter().any(|asset| {
+        asset.id == source_id
+            && asset.status == "missing"
+            && asset.metadata_state == "valid"
+            && asset.metadata_revision == expected_revision
+    });
+    if !unchanged {
+        return Err(match repair {
+            MissingRepair::Reconnect => {
+                "Missing metadata changed or duplicate UUID found; rescan before reconnecting"
+                    .into()
+            }
+            MissingRepair::Remove => "Missing metadata changed; rescan before removing it".into(),
+        });
+    }
+    Ok(result)
+}
+
 fn fresh_reconnect_scan(
     root: &Path,
     library_id: &str,
     source_id: &str,
     expected_revision: &str,
 ) -> CommandResult<ScanResult> {
-    let result = scan_tree(root, library_id, &Uuid::new_v4().to_string(), |_| {})
-        .map_err(|error| AppError::scan(root, error))?;
-    let source = result
-        .assets
-        .iter()
-        .find(|asset| asset.id == source_id)
-        .filter(|asset| {
-            asset.status == "missing"
-                && asset.metadata_state == "valid"
-                && asset.metadata_revision == expected_revision
-        })
-        .ok_or_else(|| {
-            AppError::from(
-                "Missing metadata changed or duplicate UUID found; rescan before reconnecting",
-            )
-        })?;
-    let _ = source;
+    let result = fresh_missing_scan(
+        root,
+        library_id,
+        source_id,
+        expected_revision,
+        MissingRepair::Reconnect,
+    )?;
     // Cannot establish UUID uniqueness while another manifest/directory is unreadable or malformed.
     if result.issues.iter().any(|issue| {
         issue.message != "Metadata reference is missing"
@@ -369,7 +425,14 @@ pub(super) fn reconnect_targets_domain(
         .lock()
         .map_err(|_| AppError::from("Library state unavailable"))?;
     let root = approved_edit_root(&inner, library_id)?;
-    let source = prepare_missing_source(&inner, &root, library_id, asset_id, expected_revision)?;
+    let source = prepare_missing_source(
+        &inner,
+        &root,
+        library_id,
+        asset_id,
+        expected_revision,
+        MissingRepair::Reconnect,
+    )?;
     let fresh = fresh_reconnect_scan(&root, library_id, asset_id, expected_revision)?;
     let targets = fresh
         .assets
@@ -411,8 +474,14 @@ pub(super) fn reconnect_with_writer(
         .lock()
         .map_err(|_| AppError::from("Library state unavailable"))?;
     let root = approved_edit_root(&inner, library_id)?;
-    let mut source =
-        prepare_missing_source(&inner, &root, library_id, asset_id, expected_revision)?;
+    let mut source = prepare_missing_source(
+        &inner,
+        &root,
+        library_id,
+        asset_id,
+        expected_revision,
+        MissingRepair::Reconnect,
+    )?;
     let cached_target = scanned_row(&inner, &root, library_id, target_asset_id)?;
     if !eligible_target(&root, &source, cached_target) {
         return Err(
@@ -450,7 +519,14 @@ pub(super) fn reconnect_with_writer(
     source.metadata.updated_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let bytes = source.metadata.serialize().map_err(AppError::from)?;
     // Recheck ownership, missing source and existing target immediately before the only durable write.
-    let _ = prepare_missing_source(&inner, &root, library_id, asset_id, expected_revision)?;
+    let _ = prepare_missing_source(
+        &inner,
+        &root,
+        library_id,
+        asset_id,
+        expected_revision,
+        MissingRepair::Reconnect,
+    )?;
     existing_asset_path(&root, target)?;
     validate_inside_root(&root, &source.owner)
         .map_err(|error| AppError::at_path(error, &source.owner))?;
@@ -507,6 +583,110 @@ pub(super) fn reconnect_with_writer(
     };
     record_edit_snapshot(&mut inner, &root, &result);
     Ok(result)
+}
+
+pub(super) fn remove_missing_entry_domain(
+    state: &BackendState,
+    library_id: &str,
+    asset_id: &str,
+    expected_revision: &str,
+) -> CommandResult<ScanResult> {
+    remove_missing_with_writer(
+        state,
+        library_id,
+        asset_id,
+        expected_revision,
+        manifest::write_atomic,
+    )
+}
+
+/// Removes one missing file's entry from its owning sidecar after explicit confirmation.
+/// Asset files, other entries, unknown fields and the sidecar itself are preserved.
+pub(super) fn remove_missing_with_writer(
+    state: &BackendState,
+    library_id: &str,
+    asset_id: &str,
+    expected_revision: &str,
+    writer: impl FnOnce(&Path, Option<&[u8]>, &[u8]) -> Result<(), String>,
+) -> CommandResult<ScanResult> {
+    let mut inner = state
+        .inner
+        .lock()
+        .map_err(|_| AppError::from("Library state unavailable"))?;
+    let root = approved_edit_root(&inner, library_id)?;
+    let mut source = prepare_missing_source(
+        &inner,
+        &root,
+        library_id,
+        asset_id,
+        expected_revision,
+        MissingRepair::Remove,
+    )?;
+    let fresh = fresh_missing_scan(
+        &root,
+        library_id,
+        asset_id,
+        expected_revision,
+        MissingRepair::Remove,
+    )?;
+    source
+        .metadata
+        .items
+        .remove(&source.key)
+        .ok_or_else(|| AppError::from("Missing source entry"))?;
+    source.metadata.updated_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let bytes = source.metadata.serialize().map_err(AppError::from)?;
+    // Recheck ownership and the still-missing source immediately before the only durable write.
+    let _ = prepare_missing_source(
+        &inner,
+        &root,
+        library_id,
+        asset_id,
+        expected_revision,
+        MissingRepair::Remove,
+    )?;
+    validate_inside_root(&root, &source.owner)
+        .map_err(|error| AppError::at_path(error, &source.owner))?;
+    let manifest_path = source.owner.join(manifest::MANIFEST_NAME);
+    writer(&manifest_path, Some(&source.bytes), &bytes)
+        .map_err(|error| AppError::at_path(error, &manifest_path))?;
+    let result = match scan_tree(&root, library_id, &Uuid::new_v4().to_string(), |_| {}) {
+        Ok(result) => result,
+        Err(error) => {
+            // Removal already succeeded. Return committed rows plus a visible refresh issue.
+            let mut result = fresh;
+            result.scan_id = Uuid::new_v4().to_string();
+            result.scanned_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            result.assets.retain(|asset| asset.id != asset_id);
+            let removed_path = metadata_display_path(&source.owner_relative, &source.key);
+            result.issues.retain(|issue| {
+                issue.message != "Metadata reference is missing" || issue.path != removed_path
+            });
+            result.issues.push(ScanIssue {
+                message: "Missing entry removed; library refresh failed".into(),
+                path: removed_path,
+                details: format!("Removal is durable. Reconnect library and rescan: {error}"),
+            });
+            result
+        }
+    };
+    record_edit_snapshot(&mut inner, &root, &result);
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn remove_missing_entry(
+    library_id: String,
+    asset_id: String,
+    expected_revision: String,
+    state: State<'_, BackendState>,
+) -> CommandResult<ScanResult> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_missing_entry_domain(&state, &library_id, &asset_id, &expected_revision)
+    })
+    .await
+    .map_err(|error| AppError::from(format!("Remove entry task failed: {error}")))?
 }
 
 #[tauri::command]

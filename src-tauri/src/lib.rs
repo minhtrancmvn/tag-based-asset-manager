@@ -33,6 +33,7 @@ pub fn run() {
             backend::validate_metadata,
             backend::reconnect_targets,
             backend::reconnect_asset,
+            backend::remove_missing_entry,
             backend::export_metadata,
         ])
         .run(tauri::generate_context!())

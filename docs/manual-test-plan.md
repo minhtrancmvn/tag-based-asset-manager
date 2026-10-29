@@ -94,6 +94,7 @@ Record OS version, architecture, build, test ID, library location, expected/actu
 | M5-10 | Confirm reconnect | UUID/tags/notes/unknown data transferred to explicit target; asset bytes/paths unchanged; source stale key removed only as repair |
 | M5-11 | Source reappears, stale revision, target gains identity or changes folder/link | Repair rejected, original preserved; no automatic matching |
 | M5-12 | Write failure or refresh failure after reconnect | Write failure original preserved; postcommit refresh failure explicitly says reconnect saved and asks rescan |
+| M5-12a | Delete a tagged file outside the app, rescan, choose Remove missing entry, Cancel, then confirm | Cancel leaves manifest bytes unchanged; confirm removes only that key, keeps other entries/unknown fields and asset bytes, clears the issue; file reappearing or stale revision is rejected |
 | M5-13 | Export to native-selected new JSON path then cancel next picker | Valid metadata-only backup with assets/issues/manifest raw bytes; cancellation neutral, no new file |
 | M5-14 | Export to `overwrite-check.json` in disposable backup folder; record SHA-256; export again to exact same folder and manually enter `overwrite-check.json` instead of fresh timestamped default; also test asset/sidecar/symlink destinations | Backup refuses overwrite, original SHA-256 unchanged. Saving a new timestamped name does not exercise collision handling |
 | M5-15 | Inject publish failure/unsupported filesystem | Error with path/details, no partial backup or overwrite, temp cleanup attempted |
