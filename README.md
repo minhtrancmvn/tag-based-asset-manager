@@ -1,5 +1,7 @@
 # Tag-Based Asset Manager
 
+[Downloads](https://github.com/minhtrancmvn/tag-based-asset-manager/releases) · [Code signing policy](#code-signing-policy) · [MIT License](LICENSE)
+
 Local-first Tauri v2 desktop catalog for ordinary files and folders. Milestone 5 completes native open/reveal/copy, metadata validation, confirmed reconnection and JSON backup export alongside tags, bulk edits and saved searches to native library registration/scanning. Tagging and scanning leave asset contents and paths untouched; tags live only in sidecars. Explicit Delete moves selected assets to system Trash / Recycle Bin after confirmation, and Details can preview supported files.
 
 ## Current milestone
@@ -140,3 +142,22 @@ MVP supports single/bulk sidecar tags, saved filters, native file integration an
 - [Product backlog](docs/product-backlog.md)
 
 Metadata document specifies current sidecar schema and future reconciliation limits. Progress log records actual verification rather than assuming all platforms tested.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+**Status:** application pending. Until it is approved, Windows installers are unsigned. macOS packages are not signed or notarized.
+
+Windows release binaries are built from this repository by the [Release workflow](.github/workflows/release.yml) on GitHub-hosted runners, and each signing request is approved manually.
+
+Team roles:
+
+- Committers and reviewers: [Minh Tran](https://github.com/minhtrancmvn)
+- Approvers: [Minh Tran](https://github.com/minhtrancmvn)
+
+Privacy policy: this program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
+
+## License
+
+[MIT](LICENSE) © 2026 Minh Tran
