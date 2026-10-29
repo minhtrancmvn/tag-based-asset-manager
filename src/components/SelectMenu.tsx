@@ -22,13 +22,17 @@ interface SelectMenuProps {
   /** Variant class on the root, for example `library-picker` or `filter-menu`. */
   className: string;
   leading?: ReactNode;
+  /** Separate popup action, never an option or selected value. */
+  action?: { label: string; onClick: () => void };
 }
 
-/** Select-only combobox: focus stays on the trigger, the listbox tracks an active option. */
-export function SelectMenu({ id, label, listLabel, options, value, placeholder = "", disabled, onChange, className, leading }: SelectMenuProps) {
+/** Select-only combobox; optional footer action receives real focus with Tab. */
+export function SelectMenu({ id, label, listLabel, options, value, placeholder = "", disabled, onChange, className, leading, action }: SelectMenuProps) {
   const listboxId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  const [actionFocused, setActionFocused] = useState(false);
   const typeahead = useRef({ text: "", time: 0 });
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -45,7 +49,7 @@ export function SelectMenu({ id, label, listLabel, options, value, placeholder =
     function handlePointerDown(event: PointerEvent): void {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (!listRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+      if (!rootRef.current?.contains(target)) setOpen(false);
     }
     document.addEventListener("pointerdown", handlePointerDown, true);
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
@@ -58,6 +62,7 @@ export function SelectMenu({ id, label, listLabel, options, value, placeholder =
   function openList(index = Math.max(0, options.findIndex((option) => option.value === value))): void {
     if (isDisabled) return;
     setActiveIndex(index);
+    setActionFocused(false);
     setOpen(true);
   }
 
@@ -103,14 +108,19 @@ export function SelectMenu({ id, label, listLabel, options, value, placeholder =
     else if (event.key === "Enter" || event.key === " ") choose(activeIndex);
     else if (event.key === "Escape") setOpen(false);
     else if (event.key === "Tab") {
-      setOpen(false);
+      if (action && !event.shiftKey) {
+        event.preventDefault();
+        actionRef.current?.focus();
+      } else setOpen(false);
       return;
     } else return;
     event.preventDefault();
   }
 
   return (
-    <div className={`select-menu ${className}`}>
+    <div ref={rootRef} className={`select-menu ${className}`} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
       <button
         ref={triggerRef}
         id={id}
@@ -122,11 +132,12 @@ export function SelectMenu({ id, label, listLabel, options, value, placeholder =
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
-        aria-activedescendant={open ? optionId(activeIndex) : undefined}
+        aria-activedescendant={open && !actionFocused ? optionId(activeIndex) : undefined}
         disabled={isDisabled}
         title={selected?.detail}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={handleKeyDown}
+        onFocus={() => setActionFocused(false)}
       >
         {leading}
         <span className="select-menu-text">
@@ -136,28 +147,50 @@ export function SelectMenu({ id, label, listLabel, options, value, placeholder =
         <ChevronDown size={15} className="select-menu-chevron" aria-hidden="true" />
       </button>
       {open && (
-        <ul ref={listRef} id={listboxId} role="listbox" aria-label={listLabel} className="select-menu-list">
-          {options.map((option, index) => (
-            <li
-              key={option.value}
-              id={optionId(index)}
-              role="option"
-              aria-label={[option.label, option.detail].filter(Boolean).join(" ")}
-              aria-selected={option.value === value}
-              className={`select-menu-option${index === activeIndex ? " active" : ""}`}
-              title={option.detail}
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActiveIndex(index)}
-              onClick={() => choose(index)}
-            >
-              <span className="select-menu-text">
-                <span className="select-menu-label">{option.label}</span>
-                {option.detail && <span className="select-menu-detail">{option.detail}</span>}
-              </span>
-              {option.value === value && <Check size={14} aria-hidden="true" />}
-            </li>
-          ))}
-        </ul>
+        <div className="select-menu-popup">
+          <ul id={listboxId} role="listbox" aria-label={listLabel} className="select-menu-list">
+            {options.map((option, index) => (
+              <li
+                key={option.value}
+                id={optionId(index)}
+                role="option"
+                aria-label={[option.label, option.detail].filter(Boolean).join(" ")}
+                aria-selected={option.value === value}
+                className={`select-menu-option${index === activeIndex ? " active" : ""}`}
+                title={option.detail}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => choose(index)}
+              >
+                <span className="select-menu-text">
+                  <span className="select-menu-label">{option.label}</span>
+                  {option.detail && <span className="select-menu-detail">{option.detail}</span>}
+                </span>
+                {option.value === value && <Check size={14} aria-hidden="true" />}
+              </li>
+            ))}
+          </ul>
+          {action && <div className="select-menu-footer"><button
+            ref={actionRef}
+            type="button"
+            className="select-menu-action"
+            disabled={isDisabled}
+            onMouseDown={(event) => event.preventDefault()}
+            onFocus={() => setActionFocused(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" || (event.key === "Tab" && event.shiftKey)) {
+                event.preventDefault();
+                if (event.key === "Escape") setOpen(false);
+                triggerRef.current?.focus();
+              }
+            }}
+            onClick={() => {
+              setOpen(false);
+              triggerRef.current?.focus();
+              action.onClick();
+            }}
+          >{action.label}</button></div>}
+        </div>
       )}
     </div>
   );

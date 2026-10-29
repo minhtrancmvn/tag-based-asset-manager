@@ -528,8 +528,10 @@ describe("scanned library UI", () => {
     render(<App />);
     expect(screen.getByText("Scan stopped")).toBeTruthy();
     expect(screen.queryByText(/This folder is empty/)).toBeNull();
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose library folder" }).disabled).toBe(false);
-    expect(screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" }).disabled).toBe(false);
+    const picker = screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" });
+    expect(picker.disabled).toBe(false);
+    fireEvent.click(picker);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Add library folder…" }).disabled).toBe(false);
     expect(screen.queryByRole("button", { name: "Stop scanning" })).toBeNull();
   });
 
@@ -567,6 +569,52 @@ describe("scanned library UI", () => {
     expect(assetRows()).toHaveLength(0);
     expect(screen.getByText(/No demo data is loaded in browser preview/)).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose library folder" }).disabled).toBe(true);
+  });
+
+  it("opens the native folder chooser from the library dropdown instead of a duplicate header button", () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "Choose library folder" })).toBeNull();
+    const picker = screen.getByRole("combobox", { name: "Active library" });
+    fireEvent.click(picker);
+    const add = within(screen.getByRole("complementary", { name: "Library navigation" })).getByRole("button", { name: "Add library folder…" });
+    expect(screen.queryByRole("option", { name: "Add library folder…" })).toBeNull();
+    fireEvent.click(add);
+    expect(actions.chooseLibrary).toHaveBeenCalledExactlyOnceWith();
+    expect(actions.activateLibrary).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Libraries" })).toBeNull();
+    expect(picker.textContent).toContain("Workshop");
+  });
+
+  it("offers adding a folder without a duplicate header when registered libraries have no active selection", () => {
+    setLibraryResult({ state: { libraries: [secondLibrary], activeLibraryId: null }, library: null, assets: [] });
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "Choose library folder" })).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Active library" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add library folder…" }));
+    expect(actions.chooseLibrary).toHaveBeenCalledExactlyOnceWith();
+    expect(actions.activateLibrary).not.toHaveBeenCalled();
+  });
+
+  it("disables the library chooser while a native operation is busy", () => {
+    const { rerender } = render(<App />);
+    const picker = screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" });
+    fireEvent.click(picker);
+    expect(screen.getByRole("button", { name: "Add library folder…" })).toBeTruthy();
+    setLibraryResult({ actionBusy: true });
+    rerender(<App />);
+    expect(picker.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Add library folder…" })).toBeNull();
+    expect(actions.chooseLibrary).not.toHaveBeenCalled();
+  });
+
+  it("disables the dropdown chooser outside the desktop app", () => {
+    setLibraryResult({ isDesktop: false });
+    render(<App />);
+    const picker = screen.getByRole<HTMLButtonElement>("combobox", { name: "Active library" });
+    expect(picker.disabled).toBe(true);
+    fireEvent.click(picker);
+    expect(screen.queryByRole("button", { name: "Add library folder…" })).toBeNull();
+    expect(actions.chooseLibrary).not.toHaveBeenCalled();
   });
 
   it("lists registered libraries and activates selected library", () => {

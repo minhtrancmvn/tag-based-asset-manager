@@ -7,10 +7,11 @@ interface LibraryPickerProps {
   activeLibraryId: string | null;
   disabled: boolean;
   onActivate: (libraryId: string) => void;
+  onChoose: () => void;
 }
 
 /** Sidebar library selector: name plus root path inside the box and in each option. */
-export function LibraryPicker({ libraries, activeLibraryId, disabled, onActivate }: LibraryPickerProps) {
+export function LibraryPicker({ libraries, activeLibraryId, disabled, onActivate, onChoose }: LibraryPickerProps) {
   return (
     <SelectMenu
       id="library-picker"
@@ -22,6 +23,7 @@ export function LibraryPicker({ libraries, activeLibraryId, disabled, onActivate
       placeholder={libraries.length ? "Choose a library" : "No libraries"}
       disabled={disabled}
       onChange={onActivate}
+      action={{ label: "Add library folder…", onClick: onChoose }}
       leading={<span className="library-avatar"><FolderOpen size={18} strokeWidth={1.7} /></span>}
     />
   );

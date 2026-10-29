@@ -504,7 +504,7 @@ function App() {
         {sidebarOpen ? <>
           <div className="sidebar-scroll">
             <div className="library-heading">LIBRARY <span className="demo-pill">LOCAL</span></div>
-            <LibraryPicker libraries={state.libraries} activeLibraryId={state.activeLibraryId} disabled={busy} onActivate={(libraryId) => void activateLibrary(libraryId)} />
+            <LibraryPicker libraries={state.libraries} activeLibraryId={state.activeLibraryId} disabled={!isDesktop || busy} onActivate={(libraryId) => void activateLibrary(libraryId)} onChoose={() => void chooseLibrary()} />
             <div className="nav-section-label">BROWSE</div>
             {library && <nav className="folder-breadcrumbs" aria-label="Folder path"><button type="button" onClick={() => navigateFolder("")} aria-current={!currentFolder ? "location" : undefined}>Library</button>{breadcrumbs.map((crumb) => <span key={crumb.path} className="breadcrumb-segment"><span aria-hidden="true">/</span><button type="button" onClick={() => navigateFolder(crumb.path)} aria-current={crumb.path === currentFolder ? "location" : undefined}>{crumb.name}</button></span>)}</nav>}
             <nav className="nav-list" aria-label="Catalog views">
@@ -540,7 +540,7 @@ function App() {
         <div className="page-content">
           <div className="page-heading">
             <div><h1>{noLibrary ? "Your library" : view === "all" ? "All assets" : view === "untagged" ? "Untagged" : "Needs attention"}</h1><p className="subheading">{currentFolder ? `Current folder: ${currentFolder}` : "Browse one folder level at a time. Double-click a folder to enter."}</p></div>
-            <button type="button" className="primary-button" disabled={!isDesktop || busy} onClick={() => void chooseLibrary()} title={isDesktop ? "Choose a library folder" : "Open the desktop app to select a library"}><Plus size={17} /> Choose library folder</button>
+            {!state.libraries.length && <button type="button" className="primary-button" disabled={!isDesktop || busy} onClick={() => void chooseLibrary()} title={isDesktop ? "Choose a library folder" : "Open the desktop app to select a library"}><Plus size={17} /> Choose library folder</button>}
           </div>
 
           {!isDesktop && <div className="preview-banner"><CircleAlert size={17} /><div><strong>Desktop app required</strong><span>Library selection and scanning need the Tauri desktop app. No demo data is loaded in browser preview.</span></div></div>}
