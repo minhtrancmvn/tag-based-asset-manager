@@ -95,6 +95,16 @@ pnpm tauri build
 
 Tauri writes release executables under `src-tauri/target/release/` and platform bundles under `src-tauri/target/release/bundle/`. For an executable without installer bundles, use `pnpm tauri build --no-bundle` (verified on Apple Silicon). Windows and macOS packaging must be built and validated on their respective supported host environments; no signed release artifacts or signing configuration are supplied by this milestone. For Intel macOS from Apple Silicon, install `rustup target add x86_64-apple-darwin` and use `pnpm tauri build --target x86_64-apple-darwin`; cross-target output is under `src-tauri/target/x86_64-apple-darwin/release/`. Intel macOS cross-build and Windows CI build/tests/unsigned NSIS packaging have passed; Intel hardware runtime and Windows manual installer/UI acceptance remain unverified. Apple Silicon macOS application bundle verified with `pnpm tauri build --bundles app`; unsigned output at `src-tauri/target/release/bundle/macos/Tag-Based Asset Manager.app`. This is not signed/notarized distribution; manual native integration acceptance still required. DMG installers can be requested via `pnpm tauri build --bundles dmg` on macOS, Windows NSIS via `pnpm tauri build --bundles nsis` on Windows host; local unsigned DMG integrity/copy/launch checks and Windows NSIS CI packaging passed, but signed/quarantined installer acceptance remains open. See [release readiness](docs/release-readiness.md) for exact evidence and deferred gates.
 
+### Automated releases
+
+Every push to `main` that passes [Windows checks](.github/workflows/windows-checks.yml) triggers the [Release](.github/workflows/release.yml) workflow:
+
+1. Picks the next version from commit subjects since the latest `v*` tag: `feat!:` or a `BREAKING CHANGE:` footer bumps major (minor while the version is `0.x`), `feat:` bumps minor, anything else bumps patch. Use conventional PR titles; squash-merge subjects decide the bump.
+2. Builds unsigned Apple Silicon `.dmg`/`.app.zip` and Windows x64 NSIS packages from the tested commit with that version applied, and checks both builds used the same source tree.
+3. Commits `chore(release): vX.Y.Z` (the four version files) to `main`, fast-forward only, then publishes a GitHub prerelease tagged `vX.Y.Z` with the packages, `SHA256SUMS.txt` and generated notes. Releases are never marked latest.
+
+To choose a version yourself (for example `1.0.0`), raise it in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` in the PR; a file version above the latest tag is released as-is. If `main` moves while a release is running, that run skips or fails without publishing, and the newer run releases everything. Version script tests: `node --test 'scripts/*.test.mjs'`.
+
 ## Architecture and safety boundary
 
 - `src/App.tsx` renders library/table/error states; `src/catalog.ts` remains pure query/filter/sort logic.
