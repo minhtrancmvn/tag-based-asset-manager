@@ -28,6 +28,23 @@ The v0.2.0 release provides twenty named themes in a responsive gradient-swatch 
 
 Unsigned prerelease [v0.2.0](https://github.com/minhtrancmvn/tag-based-asset-manager/releases/tag/v0.2.0) was published from merged PR #4 at exact source commit `f63186fd9db9502266c98320905dd71645c5bd20`; v0.1.0 remains unchanged. Apple Silicon macOS source acceptance committed all 20 themes and verified restart restored final Aurora selection, minimum-window layout, Right Arrow focus-only behavior, Return commit and Escape dismissal/focus restoration. Exact Tab focus destination and Windows native UI remain unverified. Older eight-theme builds cannot load the twelve new IDs; before downgrade, select an original preset or restore a compatible app-data backup while the app is stopped. See [release readiness](docs/release-readiness.md). v0.2.0 is an unsigned prerelease, not stable or signed distribution.
 
+## Opening a downloaded macOS build
+
+Release builds are not signed or notarized, so macOS blocks the downloaded app; it may say the app is damaged or cannot be verified. Download the `.dmg` (or `.app.zip`) and `SHA256SUMS.txt` from [Releases](https://github.com/minhtrancmvn/tag-based-asset-manager/releases) into the same folder and check the download first:
+
+```sh
+cd ~/Downloads
+shasum -a 256 -c --ignore-missing SHA256SUMS.txt
+```
+
+Continue only if your file reports `OK`. Copy the app to Applications, then remove the download quarantine flag from the app and everything inside it:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Tag-Based Asset Manager.app"
+```
+
+Open the app normally afterwards. If you keep it somewhere other than Applications, use that path instead.
+
 ## Prerequisites
 
 - Node.js 24.x (milestone development used `v24.19.0`).
