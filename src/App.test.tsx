@@ -2,10 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
+import { DEVELOPMENT_VERSION, getAppVersion } from "./appVersion";
 import { useLibrary } from "./useLibrary";
 import type { Asset, LibraryState, LibrarySummary, ScanIssue } from "./types";
 
 vi.mock("./useLibrary", () => ({ useLibrary: vi.fn() }));
+vi.mock("./appVersion", () => ({ DEVELOPMENT_VERSION: "Development build · version unavailable", getAppVersion: vi.fn() }));
 
 afterEach(cleanup);
 
@@ -126,12 +128,27 @@ function chooseFilter(label: string, option: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getAppVersion).mockResolvedValue("Version 0.2.0");
   actions.setTheme.mockResolvedValue(true);
   actions.previewAsset.mockResolvedValue({ kind: "unsupported", content: null, mimeType: null, truncated: false, message: "No preview available." });
   setLibraryResult();
 });
 
 describe("scanned library UI", () => {
+  it("shows the runtime app version in the persistent topbar", async () => {
+    render(<App />);
+    expect(await screen.findByText("Version 0.2.0")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByText("Version 0.2.0")).toBeTruthy();
+  });
+
+  it("shows the development fallback in browser preview", async () => {
+    vi.mocked(getAppVersion).mockResolvedValue(DEVELOPMENT_VERSION);
+    setLibraryResult({ isDesktop: false });
+    render(<App />);
+    expect(await screen.findByText(DEVELOPMENT_VERSION)).toBeTruthy();
+  });
+
   it("shows labeled theme picker in topbar, including with collapsed sidebar and no library", async () => {
     setLibraryResult({ state: { libraries: [], activeLibraryId: null }, library: null, assets: [] });
     render(<App />);

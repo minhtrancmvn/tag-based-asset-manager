@@ -21,6 +21,7 @@ import { ThemeSettings } from "./components/ThemeSettings";
 import { LibraryPicker } from "./components/LibraryPicker";
 import { SelectMenu } from "./components/SelectMenu";
 import { themeCssVariables } from "./themes";
+import { getAppVersion } from "./appVersion";
 import "./App.css";
 
 // Match fixed catalog row/header heights in App.css.
@@ -49,6 +50,7 @@ function Status({ asset }: { asset: Asset }) {
 }
 
 function App() {
+  const [appVersion, setAppVersion] = useState("Loading version…");
   const {
     state, library, assets, issues, loading, scanning, scanStopped, progress, error, cancelScan,
     chooseLibrary, activateLibrary, removeLibrary, rescan, dismissError, isDesktop, editTags, editingAssetId, editNotes, editingNotesAssetId,
@@ -89,6 +91,14 @@ function App() {
   latestLibraryId.current = state.activeLibraryId;
   const [deleteTargets, setDeleteTargets] = useState<Asset[] | null>(null);
   const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || savingTheme || actionBusy || recoveryBusy || deleting);
+
+  useEffect(() => {
+    let mounted = true;
+    void getAppVersion().then((version) => {
+      if (mounted) setAppVersion(version);
+    });
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     setView("all");
@@ -534,7 +544,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           {!sidebarOpen && <span className="collapsed-library-context" title={library?.rootPath}>{library?.name ?? "No library selected"}</span>}
-          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span></div>
+          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><span className="topbar-version" aria-label={`Application version: ${appVersion}`}>{appVersion}</span><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span></div>
         </header>
 
         <div className="page-content">
