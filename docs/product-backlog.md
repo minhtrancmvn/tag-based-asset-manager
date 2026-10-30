@@ -59,6 +59,31 @@ Allow previews of `.3mf` files. Press Space on a selected catalog file to previe
 - Preview stays read-only, resolves approved library/asset IDs in Rust and preserves asset/sidecar bytes. Any 3MF archive parsing needs explicit compressed/uncompressed size and model-complexity limits, traversal checks and no embedded script execution or network fetches.
 - Verify macOS and Windows-with-Peek behavior separately, including dismissal, provider failures and 3MF support. No native-preview compatibility claimed before actual platform testing.
 
+## APP-VERSION — Display app build version number
+
+**Status:** Implemented on 2026-10-29; UI/helper tests, full frontend suite and build passed. Packaged-app display not yet manually verified.
+
+### User request
+
+Display the app's build version number.
+
+### Current state
+
+The version is declared in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`; the Release workflow bumps all four together. The topbar shows the runtime native app version; browser preview and native metadata lookup failure show an explicit development/unknown fallback. Display is local-only and requires no settings, library, sidecar or network access.
+
+### Proposed acceptance criteria
+
+- The UI shows its version in an unobtrusive, always-reachable place, selectable as text so it can be copied into bug reports. Implemented in the persistent topbar, including when the sidebar is collapsed. Native packaging runtime not yet manually verified.
+- The value comes from the built application at runtime via Tauri app metadata, not a hand-typed string, so it cannot drift from the packaged build. `core:app:default` grants the read-only metadata command.
+- Development/browser mode and unavailable native metadata show `Development build · version unavailable`. Prerelease and unsigned labels remain deferred because runtime build provenance is not currently embedded.
+- Browser-only development mode shows a clear development/unknown value instead of a fake version.
+- No settings, library, sidecar or network access is needed to show it.
+- Tests cover the displayed value and the development fallback.
+
+### Deferred
+
+- Source commit (short SHA) alongside the semantic version.
+
 ## Broader deferred capabilities
 
 - Metadata backup import: requires explicit overwrite/conflict/recovery design.
