@@ -19,11 +19,20 @@ export function SavedSearchDialog({ filters, searches, busy, onCancel, onSave, o
   const [name, setName] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Inline second step; window.confirm is unusable because the Tauri dialog plugin replaces it with an async stub.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const selected = searches.find((search) => search.id === selectedId);
 
   useEffect(() => {
     if (selected) setName(selected.name);
   }, [selected]);
+
+  const deleteStepShown = useRef(false);
+  useEffect(() => {
+    if (!confirmingDelete && !deleteStepShown.current) return;
+    deleteStepShown.current = true;
+    dialogRef.current?.querySelector<HTMLElement>(confirmingDelete ? ".keep-search-button" : ".delete-search-button")?.focus();
+  }, [confirmingDelete]);
 
   useEffect(() => {
     previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -33,7 +42,7 @@ export function SavedSearchDialog({ filters, searches, busy, onCancel, onSave, o
   }, []);
 
   function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>): void {
-    if (event.key === "Escape" && !busy) { event.stopPropagation(); onCancel(); return; }
+    if (event.key === "Escape" && !busy) { event.stopPropagation(); if (confirmingDelete) setConfirmingDelete(false); else onCancel(); return; }
     if (event.key !== "Tab" || !dialogRef.current) return;
     const controls = [...dialogRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled)")];
     const first = controls[0];
@@ -82,10 +91,11 @@ export function SavedSearchDialog({ filters, searches, busy, onCancel, onSave, o
   }
 
   async function remove(): Promise<void> {
-    if (!selected || busy) return;
-    if (!window.confirm(`Delete saved search “${selected.name}”? This will not change files or metadata.`)) return;
+    if (!selected || busy || !confirmingDelete) return;
     setError(null);
-    if (!await onDelete(selected)) setError("Search was not deleted. Review the library error details and try again.");
+    const deleted = await onDelete(selected);
+    setConfirmingDelete(false);
+    if (!deleted) setError("Search was not deleted. Review the library error details and try again.");
   }
 
   const savingCurrent = selected ? serializeFilters(selected.filters) === serializeFilters(filters) : false;
@@ -95,13 +105,16 @@ export function SavedSearchDialog({ filters, searches, busy, onCancel, onSave, o
       <section ref={dialogRef} className="workflow-dialog saved-search-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleDialogKeyDown}>
         <div className="workflow-dialog-heading"><div><span className="dialog-eyebrow">APP-LOCAL FILTERS</span><h2 id={titleId}>Saved searches</h2></div><button className="icon-button" type="button" aria-label="Close saved searches" onClick={onCancel} disabled={busy}><X size={17} /></button></div>
         <form onSubmit={(event) => void submit(event)}>
-          {searches.length > 0 && <label className="dialog-field">Existing search<select aria-label="Existing saved search" value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setError(null); }} disabled={busy}><option value="">Create new search</option>{searches.map((search) => <option key={search.id} value={search.id}>{search.name}</option>)}</select></label>}
-          <label className="dialog-field">Search name<input aria-label="Search name" autoFocus value={name} onChange={(event) => { setName(event.target.value); setError(null); }} maxLength={100} placeholder="e.g. Untagged miniatures" disabled={busy} /></label>
+          {searches.length > 0 && <label className="dialog-field">Existing search<select aria-label="Existing saved search" value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setError(null); }} disabled={busy || confirmingDelete}><option value="">Create new search</option>{searches.map((search) => <option key={search.id} value={search.id}>{search.name}</option>)}</select></label>}
+          <label className="dialog-field">Search name<input aria-label="Search name" autoFocus value={name} onChange={(event) => { setName(event.target.value); setError(null); }} maxLength={100} placeholder="e.g. Untagged miniatures" disabled={busy || confirmingDelete} /></label>
           <div className="saved-filter-summary"><strong>Filters saved</strong><span>View: {filters.view}</span><span>Query: {filters.query || "None"}</span><span>Tag matching: {filters.matchMode === "all" ? "All required tags" : "Any required tag"}</span><span>Kind: {filters.kind === "all" ? "Files and folders" : `${filters.kind}s only`}</span></div>
           {selected && !savingCurrent && <p className="dialog-hint">Update replaces saved filters. Rename changes only the name and preserves its saved filters.</p>}
           {error && <div className="dialog-error" role="alert">{error}</div>}
-          <div className="dialog-actions saved-search-actions">{selected && <button className="danger-button" type="button" onClick={() => void remove()} disabled={busy}>Delete…</button>}<button className="secondary-button" type="button" onClick={onCancel} disabled={busy}>Close</button><button className="secondary-button" type="button" disabled={busy || !name.trim()} onClick={() => void saveNew()}>{busy ? "Saving…" : "Save as new"}</button><button className="primary-button dialog-confirm" type="button" disabled={busy || !name.trim() || !selected || savingCurrent} onClick={() => void updateCurrent()}>{busy ? "Saving…" : "Update search"}</button></div>
-          {selected && <div className="rename-row"><span>Rename preserves saved filters</span><button className="text-button" type="button" disabled={busy || !name.trim() || name.trim() === selected.name} onClick={() => void renameCurrent()}>Rename search</button></div>}
+          {selected && confirmingDelete ? <>
+            <p className="bulk-warning">Delete saved search “{selected.name}”? This will not change files or metadata.</p>
+            <div className="dialog-actions saved-search-actions"><button className="secondary-button keep-search-button" type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}>Keep search</button><button className="danger-button" type="button" onClick={() => void remove()} disabled={busy}>{busy ? "Deleting…" : "Delete search"}</button></div>
+          </> : <div className="dialog-actions saved-search-actions">{selected && <button className="danger-button delete-search-button" type="button" onClick={() => { setError(null); setConfirmingDelete(true); }} disabled={busy}>Delete…</button>}<button className="secondary-button" type="button" onClick={onCancel} disabled={busy}>Close</button><button className="secondary-button" type="button" disabled={busy || !name.trim()} onClick={() => void saveNew()}>{busy ? "Saving…" : "Save as new"}</button><button className="primary-button dialog-confirm" type="button" disabled={busy || !name.trim() || !selected || savingCurrent} onClick={() => void updateCurrent()}>{busy ? "Saving…" : "Update search"}</button></div>}
+          {selected && !confirmingDelete && <div className="rename-row"><span>Rename preserves saved filters</span><button className="text-button" type="button" disabled={busy || !name.trim() || name.trim() === selected.name} onClick={() => void renameCurrent()}>Rename search</button></div>}
         </form>
       </section>
     </div>

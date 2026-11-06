@@ -689,16 +689,40 @@ describe("scanned library UI", () => {
     expect(screen.getAllByText("Archive").length).toBeGreaterThan(0);
   });
 
-  it("confirms registration removal and states that files remain untouched", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("confirms registration removal in-app and states that files remain untouched", () => {
+    // tauri-plugin-dialog replaces window.confirm with an async function, so a synchronous caller always sees a truthy Promise.
+    const confirm = vi.spyOn(window, "confirm").mockImplementation((() => Promise.resolve(false)) as unknown as typeof window.confirm);
+    const own = (id: string, name: string): SavedSearch => ({ id, libraryId: library.id, name, filters: { query: "", view: "all", matchMode: "all", kind: "all" } });
+    setLibraryResult({ savedSearches: [own("s1", "One"), own("s2", "Two"), { ...own("s3", "Other"), libraryId: "other-library" }] });
+    render(<App />);
+    const removeButton = screen.getByRole("button", { name: "Remove library registration" });
+    const dialogName = `Remove “${library.name}” from this app?`;
+    removeButton.focus(); // keyboard activation; focus returns here on cancel
+    fireEvent.click(removeButton);
+    const dialog = screen.getByRole("dialog", { name: dialogName });
+    expect(within(dialog).getByText(/Files and folders will not be changed\. Its 2 saved searches will be deleted from this app\./)).toBeDefined();
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(actions.removeLibrary).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: dialogName })).toBeNull();
+    expect(document.activeElement).toBe(removeButton);
+    fireEvent.click(removeButton);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: dialogName }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: dialogName })).toBeNull();
+    expect(actions.removeLibrary).not.toHaveBeenCalled();
+    fireEvent.click(removeButton);
+    fireEvent.click(within(screen.getByRole("dialog", { name: dialogName })).getByRole("button", { name: "Remove library" }));
+    expect(screen.queryByRole("dialog", { name: dialogName })).toBeNull();
+    expect(actions.removeLibrary).toHaveBeenCalledOnce();
+    expect(actions.removeLibrary).toHaveBeenCalledWith(library.id);
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("states when a library being removed has no saved searches", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Remove library registration" }));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Files and folders will not be changed"));
-    expect(actions.removeLibrary).not.toHaveBeenCalled();
-    confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "Remove library registration" }));
-    expect(actions.removeLibrary).toHaveBeenCalledWith(library.id);
-    confirm.mockRestore();
+    expect(within(screen.getByRole("dialog", { name: `Remove “${library.name}” from this app?` })).getByText(/This library has no saved searches\./)).toBeDefined();
   });
 
   it("does not mislabel cleared rows as an empty library during scan or failure", () => {

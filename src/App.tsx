@@ -8,11 +8,12 @@ import {
 } from "lucide-react";
 import { formatDate, formatSize, matchesAsset, parseQuery, sortAssets, tagGroup } from "./catalog";
 import { useLibrary } from "./useLibrary";
-import type { Asset, KindFilter, SavedSearch, SearchFilters, SortDirection, SortKey, TagMatchMode, ViewKey } from "./types";
+import type { Asset, KindFilter, LibrarySummary, SavedSearch, SearchFilters, SortDirection, SortKey, TagMatchMode, ViewKey } from "./types";
 import { TagEditor } from "./components/TagEditor";
 import { folderBreadcrumbs, folderIndex, parentFolder } from "./folderBrowse";
 import { RecoveryDialog } from "./components/RecoveryDialog";
 import { RemoveMissingEntryDialog } from "./components/RemoveMissingEntryDialog";
+import { RemoveLibraryDialog } from "./components/RemoveLibraryDialog";
 import { BulkTagDialog } from "./components/BulkTagDialog";
 import { SavedSearchDialog } from "./components/SavedSearchDialog";
 import { DeleteAssetsDialog } from "./components/DeleteAssetsDialog";
@@ -160,6 +161,7 @@ function App() {
   const pendingTagFocus = useRef<string | null>(null);
   const [recovery, setRecovery] = useState<{ source: Asset; targets: Asset[]; libraryId: string } | null>(null);
   const [removal, setRemoval] = useState<{ asset: Asset; libraryId: string } | null>(null);
+  const [libraryRemoval, setLibraryRemoval] = useState<LibrarySummary | null>(null);
   const [notesDraft, setNotesDraft] = useState<{ key: string; value: string } | null>(null);
   const latestAssets = useRef(assets);
   const latestLibraryId = useRef(state.activeLibraryId);
@@ -538,9 +540,10 @@ function App() {
     window.addEventListener("mouseup", onUp);
   }
 
-  async function handleRemoveLibrary() {
-    if (!library || !window.confirm(`Remove “${library.name}” from this app? Files and folders will not be changed.`)) return;
-    await removeLibrary(library.id);
+  async function confirmRemoveLibrary(): Promise<void> {
+    const target = libraryRemoval;
+    setLibraryRemoval(null);
+    if (target) await removeLibrary(target.id);
   }
 
   async function runAction(asset: Asset, action: "open" | "reveal" | "copyFullPath" | "copyRelativePath"): Promise<void> {
@@ -789,7 +792,7 @@ function App() {
             <div className="offline-note"><span className="offline-dot" /> LOCAL-FIRST <span>·</span> SIDECAR TAGS</div>
             <button className="sidebar-action" type="button" disabled={!library || busy || !isDesktop} onClick={() => void validateMetadata()} title={!isDesktop ? "Open in desktop app to validate metadata" : undefined}><ShieldCheck size={15} /> Validate metadata</button>
             {validation && validation.libraryId === library?.id && <section className={`validation-panel ${validation.issues.length ? "validation-issues" : "validation-clean"}`} aria-label="Metadata validation results"><div className="validation-heading"><strong>{validation.issues.length ? `${validation.issues.length} validation issue${validation.issues.length === 1 ? "" : "s"}` : "Metadata validation passed"}</strong><span>{validation.assetsChecked} checked · {formatDate(validation.validatedAt)}</span></div>{validation.issues.length ? <details><summary>Review validation issues</summary><ul>{validation.issues.map((item, index) => <li key={`${item.path}-${index}`}><strong>{item.message}</strong><code title={item.path}>{item.path}</code>{item.details && <details><summary>Technical details</summary><pre>{item.details}</pre></details>}</li>)}</ul></details> : <p>No metadata integrity problems found.</p>}</section>}
-            {library && <button className="sidebar-action remove-library" type="button" disabled={busy} onClick={() => void handleRemoveLibrary()}>Remove library registration</button>}
+            {library && <button className="sidebar-action remove-library" type="button" disabled={busy} onClick={() => setLibraryRemoval(library)}>Remove library registration</button>}
           </div>
         </> : <div className="collapsed-icons" aria-hidden="true"><LayoutList size={18} /><Tag size={18} /><CircleAlert size={18} /></div>}
       </aside>
@@ -854,6 +857,7 @@ function App() {
       {!inspectorOpen && <button className="show-inspector" type="button" onClick={() => setInspectorOpen(true)} title="Show details" aria-label="Show details"><PanelRightOpen size={18} /></button>}
       {bulkTargets && <BulkTagDialog assets={bulkTargets} availableTags={availableTags} busy={bulkEditing} onCancel={() => setBulkTargets(null)} onConfirm={async (addTags, removeTags) => { const applied = await bulkEditTags(bulkTargets, addTags, removeTags); if (applied) setBulkTargets(null); return applied; }} />}
       {savedSearchDialogOpen && <SavedSearchDialog filters={currentFilters} searches={librarySavedSearches} busy={savingSearch} onCancel={() => setSavedSearchDialogOpen(false)} onSave={saveSearch} onDelete={async (search) => { const deleted = await deleteSearch(search.id); if (deleted) setSavedSearchDialogOpen(false); return deleted; }} />}
+      {libraryRemoval && <RemoveLibraryDialog library={libraryRemoval} savedSearchCount={(savedSearches ?? []).filter((search) => search.libraryId === libraryRemoval.id).length} onCancel={() => setLibraryRemoval(null)} onConfirm={() => void confirmRemoveLibrary()} />}
       {removal && <RemoveMissingEntryDialog asset={removal.asset} busy={recoveryBusy} error={error} onCancel={() => setRemoval(null)} onConfirm={confirmRemoveMissing} />}
       {recovery && <RecoveryDialog source={recovery.source} targets={recovery.targets} busy={recoveryBusy} onCancel={() => setRecovery(null)} onConfirm={confirmReconnect} />}
       {tagRenameRequest && tagRenameRequest.libraryId === library?.id && (
