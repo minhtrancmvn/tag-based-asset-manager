@@ -38,13 +38,13 @@ Isolated macOS native matrix report records commits for all twenty themes; nativ
 
 ## NOTES-EDIT — Single-item notes editor
 
-**Status:** Recommendation from product backlog review, not yet approved for implementation.
+**Status:** Implemented and merged to `main` via PR #6 on 2026-10-20 (`fce1bf2129a0084513281c343bc64836b77c5a71`).
 
-Current inspector displays notes read-only. Small next-feature candidate: edit one valid existing metadata entry with explicit Save/Cancel, native ID/revision checks and atomic owning-sidecar writes. Preserve UUID, tags, unknown fields, stale entries and browsing state; retain draft on failure. Define empty versus omitted notes/no-op semantics before implementation. Missing/blocked entries remain read-only. No bulk notes, import, rename or moves in this scope.
+Inspector supports explicit Save/Cancel for one valid existing metadata entry. Native edit requires library/row IDs and expected revision, revalidates the owning sidecar, and preserves UUID, tags, unknown fields, stale entries and asset bytes. Empty input clears optional notes; unchanged input is a no-op. Missing/blocked/untracked entries remain read-only. Notes are bounded to 64 KiB UTF-8. Validation at merge: frontend 259 tests; Rust 95 passed / 1 ignored; TypeScript, production build, formatting and strict Clippy passed; Windows CI passed. No bulk notes, import, rename or moves.
 
 ## MODEL-PREVIEW — 3MF preview and Space shortcut
 
-**Status:** User-requested backlog addition on 2026-10-11; proposed, not implemented or approved for inclusion in v0.2.0.
+**Status:** User-requested on 2026-10-11 and explicitly authorized to proceed on 2026-10-20. D4 was formally revised on 2026-10-21 through three fresh independent PROCEED reviews and hash-bound consultation validation. XML token/count/decoded-value limits now govern acceptance after parser scanning/materialization within a fixed <=64 MiB parser arena; that arena and persistent pin metadata share one process-wide <=512 MiB controlled native backing budget. Non-XML pre-allocation limits, maintained XML well-formedness validation, DTD/entity/network denial and no custom XML grammar remain. Adoption/evidence and exact decision/design/plan are preserved in the local model-preview ADR worktree under `adr/model-preview/revision-7-2026-10-21/README.md` and `adoption.json`. **Implementation remains BLOCKED pending revised-contract source/allocator/aggregate/cancellation/platform feasibility gates G1–G6; no product preview or Space wiring is implemented.** Architecture approval is not a parser, test, build, platform or release acceptance claim.
 
 ### User request
 
@@ -52,16 +52,16 @@ Allow previews of `.3mf` files. Press Space on a selected catalog file to previe
 
 ### Proposed acceptance criteria
 
-- A valid, locally available `.3mf` file has a real model preview rather than the current unsupported-format message. Define whether preview uses an in-app renderer, an embedded thumbnail or a native preview provider during design; do not assume macOS Quick Look or Windows Peek supports 3MF without verification.
-- With catalog focus and one existing file selected, Space opens its preview on macOS. On Windows, support the same interaction when Peek is installed and usable; investigate its supported invocation mechanism and file-type support before choosing an integration.
+- A valid, locally available `.3mf` file has a real model preview rather than the current unsupported-format message. Current effective design (2026-10-14) selects bounded in-app 3MF geometry preview; native Quick Look/Peek provider integration is deferred. Do not assume macOS Quick Look or Windows Peek supports 3MF.
+- With catalog focus and one existing file selected, Space requests its preview on macOS and Windows; native Peek integration is not part of this increment and no OS-provider compatibility claim is made.
 - Space continues normal behavior in text inputs, tag editing, dialogs, theme swatches and other controls. Preview dismissal restores catalog focus without changing selection, filters or browsing state.
-- Missing/blocked files, unsupported or malformed models, unavailable native providers and Windows without Peek produce a clear unavailable/error state; do not silently open an editor, install software or modify file associations.
+- Missing/blocked files, unsupported or malformed models, and unavailable preview capability produce a clear unavailable/error state. Do not fall back to a native provider, silently open an editor, install software or modify file associations.
 - Preview stays read-only, resolves approved library/asset IDs in Rust and preserves asset/sidecar bytes. Any 3MF archive parsing needs explicit compressed/uncompressed size and model-complexity limits, traversal checks and no embedded script execution or network fetches.
-- Verify macOS and Windows-with-Peek behavior separately, including dismissal, provider failures and 3MF support. No native-preview compatibility claimed before actual platform testing.
+- Verify built-in 3MF preview separately on macOS and Windows, including rejection states, dismissal, keyboard/focus restoration and renderer failures. Native Quick Look/Peek provider integration remains deferred; neither installation nor OS-provider compatibility is required or claimed for this increment.
 
 ## APP-VERSION — Display app build version number
 
-**Status:** Implemented on 2026-10-29; UI/helper tests, full frontend suite and build passed. Packaged-app display not yet manually verified.
+**Status:** Implemented on 2026-10-29; UI/helper tests, full frontend suite and build passed. User manually verified packaged v0.4.0 topbar version on 2026-10-30.
 
 ### User request
 
@@ -73,7 +73,7 @@ The version is declared in `package.json`, `src-tauri/tauri.conf.json`, `src-tau
 
 ### Proposed acceptance criteria
 
-- The UI shows its version in an unobtrusive, always-reachable place, selectable as text so it can be copied into bug reports. Implemented in the persistent topbar, including when the sidebar is collapsed. Native packaging runtime not yet manually verified.
+- The UI shows its version in an unobtrusive, always-reachable place, selectable as text so it can be copied into bug reports. Implemented in the persistent topbar, including when the sidebar is collapsed. Packaged v0.4.0 display manually verified by user on 2026-10-30.
 - The value comes from the built application at runtime via Tauri app metadata, not a hand-typed string, so it cannot drift from the packaged build. `core:app:default` grants the read-only metadata command.
 - Development/browser mode and unavailable native metadata show `Development build · version unavailable`. Prerelease and unsigned labels remain deferred because runtime build provenance is not currently embedded.
 - Browser-only development mode shows a clear development/unknown value instead of a fake version.
@@ -198,4 +198,4 @@ Automatically keep the catalog up to date when files or folders are added, chang
 
 - Metadata backup import: requires explicit overwrite/conflict/recovery design.
 - Asset rename/arbitrary moves: requires filesystem authorization, sidecar ownership and recovery design.
-- Continuous watcher and durable layout preferences: potential later work; priority not established.
+- Durable layout preferences: potential later work; priority not established.

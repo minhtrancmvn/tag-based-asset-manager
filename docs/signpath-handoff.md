@@ -20,6 +20,14 @@ User reported SignPath Foundation rejected the application on 2026-10-30. Reject
 - SignPath rejection does not block updater source work. Tauri update signatures remain mandatory even while Windows Authenticode is unavailable. Existing v0.4.0 installations require one manual installation of the first updater-enabled build.
 - Keep current unsigned prerelease warnings until final downloaded artifacts prove otherwise. Never disable signature checks to bypass missing keys.
 
+## Alternative: Microsoft Store MSIX distribution
+
+Microsoft Store can re-sign an MSIX/AppX package with a Microsoft certificate after certification, without a purchased CA-trusted code-signing certificate. This applies to Store distribution, not the existing GitHub NSIS installer: Microsoft does not re-sign EXE/MSI submissions. Individual developer registration currently has a free onboarding route with identity verification; account approval and app certification remain external gates.
+
+Tauri's native bundler currently produces EXE/MSI, not MSIX. A Store edition would require a separate Windows packaging and acceptance task: Partner Center package identity, WebView2 availability, native file pickers and approved-root access, app-data/settings preservation, and Store-managed updates instead of the GitHub NSIS self-updater. Do not assume an existing NSIS installation upgrades in place into a Store package. No Store account, package, submission or release has been created or verified under this task. GitHub packages retain unsigned warnings.
+
+References: [Microsoft MSIX package requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements), [individual developer onboarding](https://learn.microsoft.com/en-us/windows/apps/publish/whats-new-individual-developer), and [Tauri Microsoft Store guidance](https://v2.tauri.app/distribute/microsoft-store/).
+
 ## Related work
 
 See [APP-UPDATES](product-backlog.md#app-updates--new-release-notification-and-click-to-install-updates) for updater requirements and [release readiness](release-readiness.md) for platform acceptance gates.

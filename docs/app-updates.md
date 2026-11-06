@@ -167,6 +167,19 @@ OS-level code signing warnings remain distinct from updater cryptographic signin
 
 ---
 
+## Store / MSIX Future Route Note
+
+For future Windows distribution through the Microsoft Store:
+- **MSIX Signing Model**: The Store re-signing route requires MSIX/AppX packaging. Microsoft re-signs that package with a Microsoft digital certificate after certification approval. The Store also accepts qualifying Win32 `.exe` or `.msi` submissions, but does not re-sign those installers.
+- **Tauri Tooling**: Tauri currently lacks an integrated native MSIX bundler (standard desktop targets produce NSIS `.exe` or WiX `.msi`).
+- **Updater Compatibility**: A Microsoft Store build must bypass the GitHub/NSIS in-app self-updater entirely; updates for Store apps are delivered exclusively via the Microsoft Store client.
+- **Packaging Constraints**: Store MSIX packages require explicit verification of package-identity behavior, app-data virtualized storage boundaries, and native folder picker permissions.
+- **References**:
+  - Microsoft Store MSIX Package Requirements: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements
+  - Tauri Microsoft Store Distribution Guide: https://v2.tauri.app/distribute/microsoft-store/
+
+---
+
 ## Feed Schema (`latest.json`)
 
 The generated static feed strictly conforms to Tauri v2 specifications, with outer base64-encoded signatures:

@@ -2,10 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Model Routing
-
-Use Opus as primary model for planning and synthesis. Delegate independent bounded work to Sonnet, mechanical research to Haiku, and use Fable only if architectural ambiguity warrants its cost. Verify all outputs.
-
 ## Development commands
 
 Run commands from repository root. Use Node.js 24+ and pnpm 12 (`packageManager` pins `pnpm@12.4.2`); install with `pnpm install --frozen-lockfile`.
@@ -69,7 +65,7 @@ Future native work must authorize library roots in Rust, reject traversal/symlin
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **tag-based-asset-manager** (1141 symbols, 2763 relationships, 97 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **tag-based-asset-manager** (1834 symbols, 4179 relationships, 155 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
