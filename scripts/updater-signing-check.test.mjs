@@ -8,7 +8,8 @@ import { afterEach, describe, it } from "node:test";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = join(root, ".github/workflows/updater-signing-check.yml");
-const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
+// Windows checkouts without .gitattributes convert to CRLF; the policy regexes expect LF.
+const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8").replace(/\r\n/g, "\n") : "";
 const directories = [];
 
 // Nonsecret reference vector from tauri-plugin-updater 2.14.1.
