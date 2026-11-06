@@ -353,3 +353,71 @@ An independent source review found no blocking product defect. It found a `#[cfg
 - The settings-retry proof is in memory only. It ends when the app closes, the library is removed or a later rename overwrites it; dismissing the notice does not clear it. No persisted retry exists, and no native command discards the proof.
 - An unresolved partial or settings-failed notice blocks update installation. A partial rename whose rows keep failing blocks updates until the library is switched or the app restarted.
 - No undo and no cross-directory or sidecar-plus-settings rollback. Skipped-row lists cannot be copied as text.
+
+## macOS native acceptance of v0.5.1 and in-app confirmations (2026-11-06)
+
+Apple Silicon, macOS 27. The user ran M2-01 to M2-11 by hand on the installed 0.5.1 release. Claude Code ran the rest of the macOS plan on an isolated build of the v0.5.1 source (`a309b00`). That build has its own bundle identifier and app-data folder, and was used only on disposable library copies. It drove the real WKWebView interface through the accessibility API and synthetic input, and checked each case against file hashes, sidecar and settings bytes, and screenshots. It is the release source, not the signed release binary, so in-app update, Gatekeeper and quarantine behaviour are not covered.
+
+### Results
+
+All 116 cases in the [manual test plan](manual-test-plan.md) have a recorded result:
+
+| Result | Count | Cases |
+|---|---|---|
+| Passed | 92 | |
+| Passed with a note | 14 | Notes below |
+| Partial | 2 | RENAME-01, RENAME-03 |
+| Failed on v0.5.1 | 2 | M2-06, M4-11 (fixed below) |
+| Not run | 5 | M3-17, M4-14 (saves finish too fast to see the busy state; need a slow filesystem); PLATFORM-04 to 06 (need a disposable OneDrive folder) |
+| Not applicable | 1 | M4-04: the folder-level catalog never shows a folder and its own child together |
+
+All tag-rename cases ran natively for the first time. RENAME-12 and RENAME-13 injected the write failures into disposable copies only. RENAME-14 used an updater-enabled 0.5.0 build of the same source against the live 0.5.1 feed. It showed that an unresolved rename notice blocks installation, but Install was never clicked. RENAME-16 cancelled a running preview on a 96,000-file library.
+
+### Failures: confirmations that never asked
+
+- **M2-06:** **Remove library registration** removed the library at once, with no confirmation, and deleted that library's saved searches with it.
+- **M4-11:** **Delete…** on a saved search deleted it at once.
+
+In both cases no files or sidecars changed.
+
+**Cause:** `tauri-plugin-dialog` 2.8.1 injects a script that replaces `window.confirm` with an async function. `if (!window.confirm(...))` then tests a Promise, which is always truthy, so the check never stops the action. The frontend has no dialog permission, so no prompt appears either. jsdom keeps the synchronous browser `confirm`, so the interface tests passed.
+
+**Fix:**
+- Remove library registration now opens an in-app dialog (`src/components/RemoveLibraryDialog.tsx`). It states that files and folders are not changed and how many of the library's saved searches will be deleted. Focus starts on Cancel; Escape and a click on the backdrop cancel.
+- Saved-search **Delete…** now shows an in-app second step inside its dialog, with **Keep search** and **Delete search**. Escape at that step returns to the dialog and does not close it.
+- The tests now stub `window.confirm` the way the plugin does. `src/nativeDialogs.test.ts` fails if app source calls `window.confirm`, `alert` or `prompt`. Against the old source the new tests fail, and the guard names both call sites.
+- No dialog permission was added; frontend dialog grants stay out of scope.
+
+**Re-test on an isolated build of the fix branch:**
+- **M2-06 passed.** The library had 3 saved searches, and the dialog said so. Cancel and Escape each left settings byte-equal. Confirm removed only that library and its searches; other libraries and searches were unchanged, and the library's files had no changes.
+- **M4-11 passed.** Delete… kept the search stored. Keep search and Escape each kept it and the dialog. Delete search removed only that search; the other searches were byte-equal.
+
+The user's earlier manual pass of M2-06 on the installed release conflicts with this result. That release was built from the same source and lockfile, so it is expected to have the same defect.
+
+### Partial cases
+
+On macOS the PC keyboard's context-menu key reaches WebKit's own menu, which offers only "Reload", instead of the tag rename menu (RENAME-01 and RENAME-03). Right-click and Shift+F10 open the app menu and close it correctly. Apple keyboards have no such key. Windows WebView2 is unverified.
+
+### Findings not fixed here
+
+- The first Trash move asks macOS for permission to let the app control Finder, which is how the `trash` crate moves items.
+- A Trash rejection for a file changed since the scan also says "Some items may already be in Trash / Recycle Bin", even when nothing moved.
+- Quoted path search is sensitive to Unicode normalization: `"café"` typed in composed form (NFC) misses a name that macOS stores decomposed (NFD). Exact names, clipboard copies and sidecar keys keep the decomposed form.
+- One invalid saved search in settings makes startup refuse the whole settings file, so every library disappears until the file is fixed. The original bytes are preserved.
+- In the Figures test folder, "Needs attention" showed 2 while listing one row.
+- The first scan of a legacy settings file that has an active library writes `"theme": "workshop"` into the file.
+- Tab from a theme swatch closes the picker and moves focus to the page itself, not to a control.
+- The Export JSON save panel opens in the library folder.
+- The release build shows WebKit's default text menu (Look Up, Translate and similar) on right-click outside app menus.
+- Re-adding an existing tag does nothing and leaves the text in the field, with no message.
+- Choosing a sidebar view resets the query, match mode, Kind filter and selection. This is by design.
+
+### Still open
+
+- Windows 11 native acceptance.
+- Intel macOS.
+- OneDrive (PLATFORM-04 to 06).
+- A real in-app upgrade from 0.5.0.
+- Gatekeeper and quarantine behaviour of the downloaded package.
+- The context-menu key on Windows.
+- M3-17 and M4-14 on a slow filesystem.
