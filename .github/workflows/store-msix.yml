@@ -1,0 +1,128 @@
+name: Microsoft Store package
+
+# Builds the Store edition (no GitHub updater) and packs it as MSIX.
+# Manual runs only on main, plus pull requests that touch Store packaging, so releases never depend on it.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/store-msix.yml'
+      - 'src-tauri/store/**'
+      - 'src-tauri/src/app_updates.rs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-msix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  msix:
+    name: Store MSIX package
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Prepare Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install locked frontend dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Store executable
+        env:
+          TAG_ASSET_MANAGER_STORE_BUILD: '1'
+        run: |
+          if ($env:TAURI_UPDATER_PUBLIC_KEY) { throw 'The Store build must not embed the GitHub updater key' }
+          pnpm tauri build --no-bundle --ci --config src-tauri/store/tauri.store.json -- --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Pack MSIX
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unexpected app version '$version'" }
+          $kit = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1
+          if (-not $kit) { throw 'makeappx.exe not found in the Windows SDK' }
+          "SDK_BIN=$($kit.DirectoryName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          New-Item -ItemType Directory -Path msix-upload, msix-test -Force | Out-Null
+          # Revision 0 is the Store upload; revision 1 is a test-only copy for checking an in-place upgrade.
+          foreach ($revision in 0, 1) {
+            $layout = Join-Path $env:RUNNER_TEMP "msix-layout-$revision"
+            New-Item -ItemType Directory -Path (Join-Path $layout 'Assets') -Force | Out-Null
+            Copy-Item src-tauri/target/release/tag-based-asset-manager.exe $layout
+            foreach ($asset in 'StoreLogo', 'Square44x44Logo', 'Square150x150Logo') {
+              Copy-Item "src-tauri/icons/$asset.png" (Join-Path $layout 'Assets')
+            }
+            (Get-Content src-tauri/store/AppxManifest.xml -Raw).Replace('__VERSION__', "$version.$revision") |
+              Set-Content (Join-Path $layout 'AppxManifest.xml') -Encoding utf8NoBOM
+            $target = if ($revision -eq 0) { 'msix-upload' } else { 'msix-test' }
+            & $kit.FullName pack /d $layout /p "$target/Tag-Based-Asset-Manager_$version.${revision}_x64.msix" /o
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          Copy-Item msix-upload/*.msix msix-test/
+
+      - name: Test-sign copies for sideloading
+        run: |
+          # Throwaway certificate matching the manifest Publisher. Its private key never leaves this runner and is deleted below.
+          $publisher = ([xml](Get-Content src-tauri/store/AppxManifest.xml -Raw)).Package.Identity.Publisher
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher -KeyUsage DigitalSignature `
+            -FriendlyName 'Tag-Based Asset Manager MSIX test only' -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') -NotAfter (Get-Date).AddDays(30)
+          try {
+            foreach ($package in Get-ChildItem msix-test/*.msix) {
+              & (Join-Path $env:SDK_BIN 'signtool.exe') sign /fd SHA256 /sha1 $cert.Thumbprint /s My $package.FullName
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+            Export-Certificate -Cert $cert -FilePath msix-test/test-signing-certificate.cer | Out-Null
+          } finally {
+            Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -DeleteKey
+          }
+
+      - name: Record checksums
+        run: |
+          foreach ($folder in 'msix-upload', 'msix-test') {
+            Get-ChildItem $folder -File | Get-FileHash -Algorithm SHA256 |
+              ForEach-Object { "$($_.Hash.ToLowerInvariant())  $(Split-Path $_.Path -Leaf)" } |
+              Set-Content (Join-Path $folder 'SHA256SUMS.txt') -Encoding utf8NoBOM
+            Get-Content (Join-Path $folder 'SHA256SUMS.txt')
+          }
+
+      - name: Preserve Store upload package (unsigned; Microsoft signs it after certification)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: store-msix-upload
+          path: msix-upload/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Preserve test-signed packages (sideloading test only, never for upload)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: store-msix-test-signed
+          path: msix-test/
+          retention-days: 14
+          if-no-files-found: error
