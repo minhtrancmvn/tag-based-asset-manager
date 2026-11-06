@@ -1,3 +1,4 @@
+mod app_updates;
 mod backend;
 mod manifest;
 
@@ -9,12 +10,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(app_updates::UpdateState::default())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             app.manage(backend::BackendState::load(data_dir.join("settings.json"))?);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_updates::check_for_updates,
+            app_updates::install_update,
             backend::library_state,
             backend::set_app_theme,
             backend::choose_library,
@@ -35,6 +40,8 @@ pub fn run() {
             backend::reconnect_asset,
             backend::remove_missing_entry,
             backend::export_metadata,
+            backend::preview_tag_rename,
+            backend::apply_tag_rename,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the asset manager");

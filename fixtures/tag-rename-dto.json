@@ -1,0 +1,748 @@
+{
+  "version": 1,
+  "description": "Golden DTO fixture for the tag-rename native contract (JSON as sent over Tauri IPC, camelCase). Shared by Rust (src-tauri/src/tag_rename_tests.rs) and the TypeScript bridge tests. 'request' is the exact TypeScript-shaped preview request: raw source/destination plus the normalized mapping the client computed and the saved-search replacements (search ID, exact expected filters, new filters); native deserializes it with deny_unknown_fields and rejects it if normalizedMapping differs from its own normalization. 'preview' is a prefix-mode preview with a merge collision, one duplicate collapse, a missing and a blocked skip, and one uninspectable manifest. Each target and each failed/unattempted row carries duplicatesCollapsed (the per-row merge count; 'preview'.duplicatesCollapsed is their total). 'previewOutcomeReady', 'previewOutcomeCancelled' and 'previewOutcomeDiscarded' are the tagged results of the preview command ({status: ready, preview} | {status: cancelled} | {status: discarded, reason: mutation|library-changed|sidecar-changed}). 'retryPreview' is the zero-target settings-only retry preview (settingsRetry true, no targets). 'applyComplete', 'applyPartial' (first group committed, second failed, third unattempted) and 'applySettingsFailed' (sidecars committed, settings persistence failed, saved searches and query unchanged) are the three apply outcomes. Fields that are absent-optional in the Asset DTO (notes) are omitted; other optional fields serialize as null. Changing this file is a contract change: update Rust and TypeScript mirrors together.",
+  "request": {
+    "libraryId": "lib-1",
+    "scanId": "scan-1",
+    "mode": "prefix",
+    "source": " Status: ",
+    "destination": "State",
+    "normalizedMapping": {
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state"
+    },
+    "savedSearchReplacements": [
+      {
+        "searchId": "search-1",
+        "expectedFilters": {
+          "query": "status:printed -status:draft \"Flexi Dragon\"",
+          "view": "all",
+          "matchMode": "all",
+          "kind": "all"
+        },
+        "filters": {
+          "query": "state:printed -state:draft \"Flexi Dragon\"",
+          "view": "all",
+          "matchMode": "all",
+          "kind": "all"
+        }
+      }
+    ]
+  },
+  "preview": {
+    "previewId": "6f1c1e0a-6a53-4a39-8a55-1b8d3d8f0001",
+    "libraryId": "lib-1",
+    "scanId": "scan-1",
+    "mapping": {
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state"
+    },
+    "scan": {
+      "libraryId": "lib-1",
+      "scanId": "scan-1",
+      "assets": [
+        {
+          "id": "path:Archive",
+          "name": "Archive",
+          "relativePath": "Archive",
+          "kind": "folder",
+          "extension": null,
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": null,
+          "tags": [
+            "status:draft"
+          ],
+          "status": "ready",
+          "metadataId": "22222222-2222-4222-8222-222222222222",
+          "metadataState": "valid",
+          "metadataRevision": "rev-archive-1"
+        },
+        {
+          "id": "path:Models/dragon.stl",
+          "name": "dragon.stl",
+          "relativePath": "Models/dragon.stl",
+          "kind": "file",
+          "extension": "stl",
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": 2048,
+          "tags": [
+            "favorite",
+            "state:printed",
+            "status:printed"
+          ],
+          "status": "ready",
+          "metadataId": "11111111-1111-4111-8111-111111111111",
+          "metadataState": "valid",
+          "metadataRevision": "rev-dragon-1"
+        },
+        {
+          "id": "path:Zeta/part.stl",
+          "name": "part.stl",
+          "relativePath": "Zeta/part.stl",
+          "kind": "file",
+          "extension": "stl",
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": 2048,
+          "tags": [
+            "status:printed:large"
+          ],
+          "status": "ready",
+          "metadataId": "33333333-3333-4333-8333-333333333333",
+          "metadataState": "valid",
+          "metadataRevision": "rev-part-1"
+        },
+        {
+          "id": "path:Models/old.stl",
+          "name": "old.stl",
+          "relativePath": "Models/old.stl",
+          "kind": "file",
+          "extension": "stl",
+          "modifiedAt": null,
+          "sizeBytes": null,
+          "tags": [
+            "status:printed"
+          ],
+          "status": "missing",
+          "metadataId": "44444444-4444-4444-8444-444444444444",
+          "metadataState": "valid",
+          "metadataRevision": "rev-old-1"
+        },
+        {
+          "id": "path:Dup/copy.stl",
+          "name": "copy.stl",
+          "relativePath": "Dup/copy.stl",
+          "kind": "file",
+          "extension": "stl",
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": 2048,
+          "tags": [
+            "status:printed"
+          ],
+          "status": "ready",
+          "metadataId": "11111111-1111-4111-8111-111111111111",
+          "metadataState": "blocked",
+          "metadataRevision": "rev-copy-1"
+        }
+      ],
+      "issues": [
+        {
+          "message": "Manifest is malformed",
+          "path": "Broken/.asset-tags.json",
+          "details": "expected value at line 1 column 1"
+        }
+      ],
+      "scannedAt": "2026-11-04T09:00:00.000Z"
+    },
+    "targets": [
+      {
+        "assetId": "path:Archive",
+        "relativePath": "Archive",
+        "kind": "folder",
+        "sidecarOwner": "Archive",
+        "duplicatesCollapsed": 0
+      },
+      {
+        "assetId": "path:Models/dragon.stl",
+        "relativePath": "Models/dragon.stl",
+        "kind": "file",
+        "sidecarOwner": "Models",
+        "duplicatesCollapsed": 1
+      },
+      {
+        "assetId": "path:Zeta/part.stl",
+        "relativePath": "Zeta/part.stl",
+        "kind": "file",
+        "sidecarOwner": "Zeta",
+        "duplicatesCollapsed": 0
+      }
+    ],
+    "fileCount": 2,
+    "folderCount": 1,
+    "sidecarCount": 3,
+    "destinationExists": true,
+    "collisions": [
+      {
+        "from": "status:printed",
+        "to": "state:printed"
+      }
+    ],
+    "duplicatesCollapsed": 1,
+    "skipped": [
+      {
+        "assetId": "path:Models/old.stl",
+        "relativePath": "Models/old.stl",
+        "kind": "file",
+        "reason": "missing",
+        "message": null
+      },
+      {
+        "assetId": "path:Dup/copy.stl",
+        "relativePath": "Dup/copy.stl",
+        "kind": "file",
+        "reason": "blocked",
+        "message": "Duplicate metadata UUID; rescan before editing"
+      }
+    ],
+    "uninspectable": [
+      {
+        "message": "Manifest is malformed",
+        "path": "Broken/.asset-tags.json",
+        "details": "expected value at line 1 column 1"
+      }
+    ],
+    "savedSearchUpdateCount": 1,
+    "settingsRetry": false
+  },
+  "retryPreview": {
+    "previewId": "6f1c1e0a-6a53-4a39-8a55-1b8d3d8f0002",
+    "libraryId": "lib-1",
+    "scanId": "scan-2",
+    "mapping": {
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state"
+    },
+    "scan": {
+      "libraryId": "lib-1",
+      "scanId": "scan-2",
+      "assets": [
+        {
+          "id": "path:Archive",
+          "name": "Archive",
+          "relativePath": "Archive",
+          "kind": "folder",
+          "extension": null,
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": null,
+          "tags": [
+            "state:draft"
+          ],
+          "status": "ready",
+          "metadataId": "22222222-2222-4222-8222-222222222222",
+          "metadataState": "valid",
+          "metadataRevision": "rev-archive-2"
+        },
+        {
+          "id": "path:Models/dragon.stl",
+          "name": "dragon.stl",
+          "relativePath": "Models/dragon.stl",
+          "kind": "file",
+          "extension": "stl",
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": 2048,
+          "tags": [
+            "favorite",
+            "state:printed"
+          ],
+          "status": "ready",
+          "metadataId": "11111111-1111-4111-8111-111111111111",
+          "metadataState": "valid",
+          "metadataRevision": "rev-dragon-2"
+        },
+        {
+          "id": "path:Zeta/part.stl",
+          "name": "part.stl",
+          "relativePath": "Zeta/part.stl",
+          "kind": "file",
+          "extension": "stl",
+          "modifiedAt": "2026-11-01T10:00:00.000Z",
+          "sizeBytes": 2048,
+          "tags": [
+            "state:printed:large"
+          ],
+          "status": "ready",
+          "metadataId": "33333333-3333-4333-8333-333333333333",
+          "metadataState": "valid",
+          "metadataRevision": "rev-part-2"
+        }
+      ],
+      "issues": [],
+      "scannedAt": "2026-11-04T09:30:00.000Z"
+    },
+    "targets": [],
+    "fileCount": 0,
+    "folderCount": 0,
+    "sidecarCount": 0,
+    "destinationExists": false,
+    "collisions": [],
+    "duplicatesCollapsed": 0,
+    "skipped": [],
+    "uninspectable": [],
+    "savedSearchUpdateCount": 1,
+    "settingsRetry": true
+  },
+  "applyComplete": {
+    "previewId": "6f1c1e0a-6a53-4a39-8a55-1b8d3d8f0001",
+    "libraryId": "lib-1",
+    "mapping": {
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state"
+    },
+    "committed": [
+      {
+        "id": "path:Archive",
+        "name": "Archive",
+        "relativePath": "Archive",
+        "kind": "folder",
+        "extension": null,
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": null,
+        "tags": [
+          "state:draft"
+        ],
+        "status": "ready",
+        "metadataId": "22222222-2222-4222-8222-222222222222",
+        "metadataState": "valid",
+        "metadataRevision": "rev-archive-2"
+      },
+      {
+        "id": "path:Models/dragon.stl",
+        "name": "dragon.stl",
+        "relativePath": "Models/dragon.stl",
+        "kind": "file",
+        "extension": "stl",
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": 2048,
+        "tags": [
+          "favorite",
+          "state:printed"
+        ],
+        "status": "ready",
+        "metadataId": "11111111-1111-4111-8111-111111111111",
+        "metadataState": "valid",
+        "metadataRevision": "rev-dragon-2"
+      },
+      {
+        "id": "path:Zeta/part.stl",
+        "name": "part.stl",
+        "relativePath": "Zeta/part.stl",
+        "kind": "file",
+        "extension": "stl",
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": 2048,
+        "tags": [
+          "state:printed:large"
+        ],
+        "status": "ready",
+        "metadataId": "33333333-3333-4333-8333-333333333333",
+        "metadataState": "valid",
+        "metadataRevision": "rev-part-2"
+      }
+    ],
+    "failed": [],
+    "unattempted": [],
+    "failingSidecar": null,
+    "skipped": [
+      {
+        "assetId": "path:Models/old.stl",
+        "relativePath": "Models/old.stl",
+        "kind": "file",
+        "reason": "missing",
+        "message": null
+      },
+      {
+        "assetId": "path:Dup/copy.stl",
+        "relativePath": "Dup/copy.stl",
+        "kind": "file",
+        "reason": "blocked",
+        "message": "Duplicate metadata UUID; rescan before editing"
+      }
+    ],
+    "uninspectable": [
+      {
+        "message": "Manifest is malformed",
+        "path": "Broken/.asset-tags.json",
+        "details": "expected value at line 1 column 1"
+      }
+    ],
+    "savedSearches": [
+      {
+        "id": "search-1",
+        "libraryId": "lib-1",
+        "name": "Printed models",
+        "filters": {
+          "query": "state:printed -state:draft \"Flexi Dragon\"",
+          "view": "all",
+          "matchMode": "all",
+          "kind": "all"
+        }
+      }
+    ],
+    "error": null,
+    "outcome": "complete",
+    "queryMigrated": true
+  },
+  "applyPartial": {
+    "previewId": "6f1c1e0a-6a53-4a39-8a55-1b8d3d8f0001",
+    "libraryId": "lib-1",
+    "mapping": {
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state"
+    },
+    "committed": [
+      {
+        "id": "path:Archive",
+        "name": "Archive",
+        "relativePath": "Archive",
+        "kind": "folder",
+        "extension": null,
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": null,
+        "tags": [
+          "state:draft"
+        ],
+        "status": "ready",
+        "metadataId": "22222222-2222-4222-8222-222222222222",
+        "metadataState": "valid",
+        "metadataRevision": "rev-archive-2"
+      }
+    ],
+    "failed": [
+      {
+        "assetId": "path:Models/dragon.stl",
+        "relativePath": "Models/dragon.stl",
+        "kind": "file",
+        "sidecarOwner": "Models",
+        "duplicatesCollapsed": 1
+      }
+    ],
+    "unattempted": [
+      {
+        "assetId": "path:Zeta/part.stl",
+        "relativePath": "Zeta/part.stl",
+        "kind": "file",
+        "sidecarOwner": "Zeta",
+        "duplicatesCollapsed": 0
+      }
+    ],
+    "failingSidecar": "Models/.asset-tags.json",
+    "skipped": [
+      {
+        "assetId": "path:Models/old.stl",
+        "relativePath": "Models/old.stl",
+        "kind": "file",
+        "reason": "missing",
+        "message": null
+      },
+      {
+        "assetId": "path:Dup/copy.stl",
+        "relativePath": "Dup/copy.stl",
+        "kind": "file",
+        "reason": "blocked",
+        "message": "Duplicate metadata UUID; rescan before editing"
+      }
+    ],
+    "uninspectable": [
+      {
+        "message": "Manifest is malformed",
+        "path": "Broken/.asset-tags.json",
+        "details": "expected value at line 1 column 1"
+      }
+    ],
+    "savedSearches": [
+      {
+        "id": "search-1",
+        "libraryId": "lib-1",
+        "name": "Printed models",
+        "filters": {
+          "query": "status:printed -status:draft \"Flexi Dragon\"",
+          "view": "all",
+          "matchMode": "all",
+          "kind": "all"
+        }
+      }
+    ],
+    "error": {
+      "message": "Tag rename partially applied: 1 of 3 sidecars completed; remaining changes were not applied",
+      "path": "/library/Models/.asset-tags.json",
+      "details": "disk full"
+    },
+    "outcome": "partial",
+    "queryMigrated": false
+  },
+  "applySettingsFailed": {
+    "previewId": "6f1c1e0a-6a53-4a39-8a55-1b8d3d8f0001",
+    "libraryId": "lib-1",
+    "mapping": {
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state"
+    },
+    "committed": [
+      {
+        "id": "path:Archive",
+        "name": "Archive",
+        "relativePath": "Archive",
+        "kind": "folder",
+        "extension": null,
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": null,
+        "tags": [
+          "state:draft"
+        ],
+        "status": "ready",
+        "metadataId": "22222222-2222-4222-8222-222222222222",
+        "metadataState": "valid",
+        "metadataRevision": "rev-archive-2"
+      },
+      {
+        "id": "path:Models/dragon.stl",
+        "name": "dragon.stl",
+        "relativePath": "Models/dragon.stl",
+        "kind": "file",
+        "extension": "stl",
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": 2048,
+        "tags": [
+          "favorite",
+          "state:printed"
+        ],
+        "status": "ready",
+        "metadataId": "11111111-1111-4111-8111-111111111111",
+        "metadataState": "valid",
+        "metadataRevision": "rev-dragon-2"
+      },
+      {
+        "id": "path:Zeta/part.stl",
+        "name": "part.stl",
+        "relativePath": "Zeta/part.stl",
+        "kind": "file",
+        "extension": "stl",
+        "modifiedAt": "2026-11-01T10:00:00.000Z",
+        "sizeBytes": 2048,
+        "tags": [
+          "state:printed:large"
+        ],
+        "status": "ready",
+        "metadataId": "33333333-3333-4333-8333-333333333333",
+        "metadataState": "valid",
+        "metadataRevision": "rev-part-2"
+      }
+    ],
+    "failed": [],
+    "unattempted": [],
+    "failingSidecar": null,
+    "skipped": [
+      {
+        "assetId": "path:Models/old.stl",
+        "relativePath": "Models/old.stl",
+        "kind": "file",
+        "reason": "missing",
+        "message": null
+      },
+      {
+        "assetId": "path:Dup/copy.stl",
+        "relativePath": "Dup/copy.stl",
+        "kind": "file",
+        "reason": "blocked",
+        "message": "Duplicate metadata UUID; rescan before editing"
+      }
+    ],
+    "uninspectable": [
+      {
+        "message": "Manifest is malformed",
+        "path": "Broken/.asset-tags.json",
+        "details": "expected value at line 1 column 1"
+      }
+    ],
+    "savedSearches": [
+      {
+        "id": "search-1",
+        "libraryId": "lib-1",
+        "name": "Printed models",
+        "filters": {
+          "query": "status:printed -status:draft \"Flexi Dragon\"",
+          "view": "all",
+          "matchMode": "all",
+          "kind": "all"
+        }
+      }
+    ],
+    "error": {
+      "message": "Could not save library settings",
+      "path": "/app-data/settings.json",
+      "details": "disk full"
+    },
+    "outcome": "settings-failed",
+    "queryMigrated": false
+  },
+  "previewOutcomeReady": {
+    "status": "ready",
+    "preview": {
+      "previewId": "6f1c1e0a-6a53-4a39-8a55-1b8d3d8f0001",
+      "libraryId": "lib-1",
+      "scanId": "scan-1",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "scan": {
+        "libraryId": "lib-1",
+        "scanId": "scan-1",
+        "assets": [
+          {
+            "id": "path:Archive",
+            "name": "Archive",
+            "relativePath": "Archive",
+            "kind": "folder",
+            "extension": null,
+            "modifiedAt": "2026-11-01T10:00:00.000Z",
+            "sizeBytes": null,
+            "tags": [
+              "status:draft"
+            ],
+            "status": "ready",
+            "metadataId": "22222222-2222-4222-8222-222222222222",
+            "metadataState": "valid",
+            "metadataRevision": "rev-archive-1"
+          },
+          {
+            "id": "path:Models/dragon.stl",
+            "name": "dragon.stl",
+            "relativePath": "Models/dragon.stl",
+            "kind": "file",
+            "extension": "stl",
+            "modifiedAt": "2026-11-01T10:00:00.000Z",
+            "sizeBytes": 2048,
+            "tags": [
+              "favorite",
+              "state:printed",
+              "status:printed"
+            ],
+            "status": "ready",
+            "metadataId": "11111111-1111-4111-8111-111111111111",
+            "metadataState": "valid",
+            "metadataRevision": "rev-dragon-1"
+          },
+          {
+            "id": "path:Zeta/part.stl",
+            "name": "part.stl",
+            "relativePath": "Zeta/part.stl",
+            "kind": "file",
+            "extension": "stl",
+            "modifiedAt": "2026-11-01T10:00:00.000Z",
+            "sizeBytes": 2048,
+            "tags": [
+              "status:printed:large"
+            ],
+            "status": "ready",
+            "metadataId": "33333333-3333-4333-8333-333333333333",
+            "metadataState": "valid",
+            "metadataRevision": "rev-part-1"
+          },
+          {
+            "id": "path:Models/old.stl",
+            "name": "old.stl",
+            "relativePath": "Models/old.stl",
+            "kind": "file",
+            "extension": "stl",
+            "modifiedAt": null,
+            "sizeBytes": null,
+            "tags": [
+              "status:printed"
+            ],
+            "status": "missing",
+            "metadataId": "44444444-4444-4444-8444-444444444444",
+            "metadataState": "valid",
+            "metadataRevision": "rev-old-1"
+          },
+          {
+            "id": "path:Dup/copy.stl",
+            "name": "copy.stl",
+            "relativePath": "Dup/copy.stl",
+            "kind": "file",
+            "extension": "stl",
+            "modifiedAt": "2026-11-01T10:00:00.000Z",
+            "sizeBytes": 2048,
+            "tags": [
+              "status:printed"
+            ],
+            "status": "ready",
+            "metadataId": "11111111-1111-4111-8111-111111111111",
+            "metadataState": "blocked",
+            "metadataRevision": "rev-copy-1"
+          }
+        ],
+        "issues": [
+          {
+            "message": "Manifest is malformed",
+            "path": "Broken/.asset-tags.json",
+            "details": "expected value at line 1 column 1"
+          }
+        ],
+        "scannedAt": "2026-11-04T09:00:00.000Z"
+      },
+      "targets": [
+        {
+          "assetId": "path:Archive",
+          "relativePath": "Archive",
+          "kind": "folder",
+          "sidecarOwner": "Archive",
+          "duplicatesCollapsed": 0
+        },
+        {
+          "assetId": "path:Models/dragon.stl",
+          "relativePath": "Models/dragon.stl",
+          "kind": "file",
+          "sidecarOwner": "Models",
+          "duplicatesCollapsed": 1
+        },
+        {
+          "assetId": "path:Zeta/part.stl",
+          "relativePath": "Zeta/part.stl",
+          "kind": "file",
+          "sidecarOwner": "Zeta",
+          "duplicatesCollapsed": 0
+        }
+      ],
+      "fileCount": 2,
+      "folderCount": 1,
+      "sidecarCount": 3,
+      "destinationExists": true,
+      "collisions": [
+        {
+          "from": "status:printed",
+          "to": "state:printed"
+        }
+      ],
+      "duplicatesCollapsed": 1,
+      "skipped": [
+        {
+          "assetId": "path:Models/old.stl",
+          "relativePath": "Models/old.stl",
+          "kind": "file",
+          "reason": "missing",
+          "message": null
+        },
+        {
+          "assetId": "path:Dup/copy.stl",
+          "relativePath": "Dup/copy.stl",
+          "kind": "file",
+          "reason": "blocked",
+          "message": "Duplicate metadata UUID; rescan before editing"
+        }
+      ],
+      "uninspectable": [
+        {
+          "message": "Manifest is malformed",
+          "path": "Broken/.asset-tags.json",
+          "details": "expected value at line 1 column 1"
+        }
+      ],
+      "savedSearchUpdateCount": 1,
+      "settingsRetry": false
+    }
+  },
+  "previewOutcomeCancelled": {
+    "status": "cancelled"
+  },
+  "previewOutcomeDiscarded": {
+    "status": "discarded",
+    "reason": "mutation"
+  }
+}

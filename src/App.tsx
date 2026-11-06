@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDown, ArrowUp, ChevronLeft, ChevronRight, CircleAlert,
   Columns3, FileArchive, FileBox, FileImage, FileText, Folder,
   FolderOpen, LayoutList, PanelRightClose, PanelRightOpen,
-  Plus, RotateCw, Search, SlidersHorizontal, Tag, X, Copy, ExternalLink, FolderSearch, Download, ShieldCheck, Wrench, Trash2,
+  Pencil, Plus, RotateCw, Search, SlidersHorizontal, Tag, X, Copy, ExternalLink, FolderSearch, Download, ShieldCheck, Wrench, Trash2,
 } from "lucide-react";
 import { formatDate, formatSize, matchesAsset, parseQuery, sortAssets, tagGroup } from "./catalog";
 import { useLibrary } from "./useLibrary";
@@ -18,8 +18,13 @@ import { SavedSearchDialog } from "./components/SavedSearchDialog";
 import { DeleteAssetsDialog } from "./components/DeleteAssetsDialog";
 import { AssetPreview } from "./components/AssetPreview";
 import { ThemeSettings } from "./components/ThemeSettings";
+import { AppUpdates } from "./components/AppUpdates";
+import { TagRenameDialog } from "./components/TagRenameDialog";
+import type { RenameOutcomeReport } from "./components/TagRenameDialog";
 import { LibraryPicker } from "./components/LibraryPicker";
 import { SelectMenu } from "./components/SelectMenu";
+import { normalizeRenameMapping } from "./tagRename";
+import type { RenameMapping, RenameMode } from "./tagRename";
 import { themeCssVariables } from "./themes";
 import { getAppVersion } from "./appVersion";
 import "./App.css";
@@ -31,6 +36,68 @@ const overscanRows = 8;
 const defaultWidths: Record<string, number> = {
   name: 255, tags: 365, type: 88, path: 268, modified: 130, size: 100, status: 122,
 };
+
+/** Normalized source name for a rename, or null when native-bound normalization would reject the name itself. */
+function renameSource(mode: RenameMode, name: string): string | null {
+  // The destination only has to differ from every source, as in TagRenameDialog's probe.
+  const probe = normalizeRenameMapping(mode, name, "\u0000");
+  return probe.ok ? probe.mapping.source : null;
+}
+
+/** Open sidebar tag menu. A null source means that action is not offered for the originating element. */
+interface TagMenuState {
+  origin: HTMLElement;
+  originKey: string;
+  exactSource: string | null;
+  prefixSource: string | null;
+  x: number;
+  y: number;
+}
+
+/**
+ * Session-only rename request recorded by a chosen menu action. The dialog is mounted from this state, so it
+ * carries the origin element for focus return.
+ */
+interface TagRenameRequest {
+  libraryId: string;
+  mode: RenameMode;
+  /** Full normalized tag for `exact`; the first colon segment without a trailing colon for `prefix`. */
+  source: string;
+  originKey: string;
+  origin: HTMLElement;
+  /** Set when the dialog reopens an unresolved partial or settings-failed outcome. */
+  resume?: RenameOutcomeReport;
+}
+
+/**
+ * Partial or settings-failed outcome that stays reachable after its dialog closes. Session-only, one per rename,
+ * and dropped on a library change; native holds the matching settings-retry proof in memory only.
+ */
+interface RenameNotice {
+  key: string;
+  libraryId: string;
+  report: RenameOutcomeReport;
+}
+
+function renameNoticeKey(mapping: RenameMapping): string {
+  return `${mapping.mode}:${mapping.source}>${mapping.destination}`;
+}
+
+function renameNames(report: RenameOutcomeReport): { from: string; to: string } {
+  const { mapping } = report.result;
+  return report.mode === "prefix" ? { from: `${mapping.source}:`, to: `${mapping.destination}:` } : { from: mapping.source, to: mapping.destination };
+}
+
+function renameNoticeText(report: RenameOutcomeReport): string {
+  const { result } = report;
+  const { from, to } = renameNames(report);
+  const detail = result.error ? ` Detail: ${result.error.message}` : "";
+  if (result.outcome === "partial") {
+    const total = result.committed.length + result.failed.length + result.unattempted.length;
+    return `Tag rename not finished: ${from} to ${to}. ${result.committed.length} of ${total} rows were renamed. Saved searches and the active query still use the old name.${detail}`;
+  }
+  return `Tag rename saved, but saved searches were not updated: ${from} to ${to}. Saved searches and the active query still use the old name. Retry works only until the app closes.${detail}`;
+}
 
 function AssetIcon({ asset, size = 17 }: { asset: Asset; size?: number }) {
   const props = { size, strokeWidth: 1.7, "aria-hidden": true as const };
@@ -58,6 +125,7 @@ function App() {
     performAction, actionBusy, validateMetadata, validation, exportMetadata, exportResult,
     getReconnectTargets, reconnectAsset, removeMissingEntry, recoveryBusy, deleteAssets, deleting, previewAsset,
     theme, savingTheme, setTheme,
+    previewTagRename, cancelTagRenamePreview, applyTagRename, renamePreviewing, renameApplying, renameProgress,
   } = useLibrary();
   const [view, setView] = useState<ViewKey>("all");
   const [query, setQuery] = useState("");
@@ -81,16 +149,63 @@ function App() {
   const [tableHeight, setTableHeight] = useState(520);
   const [contextTarget, setContextTarget] = useState<{ asset: Asset; x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const [tagMenu, setTagMenu] = useState<TagMenuState | null>(null);
+  const tagMenuRef = useRef<HTMLDivElement>(null);
+  const [tagRenameRequest, setTagRenameRequest] = useState<TagRenameRequest | null>(null);
+  const [renameNotices, setRenameNotices] = useState<RenameNotice[]>([]);
+  const tagsHeaderRef = useRef<HTMLDivElement>(null);
+  // Some platforms also fire a `contextmenu` event after a handled ContextMenu key or Shift+F10.
+  const keyboardTagMenu = useRef<{ origin: HTMLElement; at: number } | null>(null);
+  // Key of the tag or group action that should regain focus once it is enabled, or the TAGS header if it is gone.
+  const pendingTagFocus = useRef<string | null>(null);
   const [recovery, setRecovery] = useState<{ source: Asset; targets: Asset[]; libraryId: string } | null>(null);
   const [removal, setRemoval] = useState<{ asset: Asset; libraryId: string } | null>(null);
   const [notesDraft, setNotesDraft] = useState<{ key: string; value: string } | null>(null);
   const latestAssets = useRef(assets);
   const latestLibraryId = useRef(state.activeLibraryId);
   const reconnectRequest = useRef(0);
+  // Live active query for the rename compare-and-set; assigned in render so a completion always reads the latest value.
+  const latestQuery = useRef(query);
   latestAssets.current = assets;
   latestLibraryId.current = state.activeLibraryId;
+  latestQuery.current = query;
   const [deleteTargets, setDeleteTargets] = useState<Asset[] | null>(null);
-  const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || savingTheme || actionBusy || recoveryBusy || deleting);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const appShellRef = useRef<HTMLDivElement>(null);
+  const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || savingTheme || actionBusy || recoveryBusy || deleting || installingUpdate || renamePreviewing || renameApplying);
+
+  const updateBlockedReason = useMemo(() => {
+    if (scanning) return "Scan in progress. Stop scan before updating.";
+    if (loading) return "Library is loading. Wait for loading to finish before updating.";
+    if (editingNotesAssetId !== null) return "Notes edit in progress. Save or cancel notes before updating.";
+    if (notesDraft !== null) return "Unsaved notes draft. Save or cancel notes before updating.";
+    if (editingAssetId !== null) return "Tag edit in progress. Wait for edit to finish before updating.";
+    if (bulkTargets !== null || bulkEditing) return "Bulk tag editor open. Save or cancel bulk edit before updating.";
+    if (savedSearchDialogOpen || savingSearch) return "Saved search dialog open. Close dialog before updating.";
+    if (deleteTargets !== null || deleting) return "Delete confirmation open. Confirm or cancel delete before updating.";
+    if (removal !== null) return "Remove entry confirmation open. Confirm or cancel before updating.";
+    if (recovery !== null || recoveryBusy) return "Metadata reconnect open. Confirm or cancel before updating.";
+    if (actionBusy) return "File action in progress. Wait before updating.";
+    if (savingTheme) return "Saving theme. Wait before updating.";
+    // Rename reasons come last so every fixed check above keeps its own message.
+    if (renamePreviewing || renameApplying) return "Tag rename in progress. Wait for it to finish before updating.";
+    if (tagRenameRequest !== null) return "Tag rename dialog open. Finish or cancel the rename before updating.";
+    if (renameNotices.length > 0) return "Tag rename not finished. Retry it or resolve the rename notice before updating.";
+    return null;
+  }, [scanning, loading, editingNotesAssetId, notesDraft, editingAssetId, bulkTargets, bulkEditing, savedSearchDialogOpen, savingSearch, deleteTargets, deleting, removal, recovery, recoveryBusy, actionBusy, savingTheme, renamePreviewing, renameApplying, tagRenameRequest, renameNotices]);
+
+  const getUpdateBlockedReason = useCallback(() => {
+    if (updateBlockedReason) return updateBlockedReason;
+    if (appShellRef.current) {
+      const inputs = appShellRef.current.querySelectorAll<HTMLInputElement>(".tag-add-input");
+      for (const input of inputs) {
+        if (input.value.trim().length > 0) {
+          return "Unsaved tag input draft. Press Enter to add or clear the tag before updating.";
+        }
+      }
+    }
+    return null;
+  }, [updateBlockedReason]);
 
   useEffect(() => {
     let mounted = true;
@@ -111,11 +226,19 @@ function App() {
     setBulkTargets(null);
     setSavedSearchDialogOpen(false);
     setContextTarget(null);
+    setTagMenu(null);
+    setTagRenameRequest(null);
+    setRenameNotices([]);
+    keyboardTagMenu.current = null;
+    pendingTagFocus.current = null;
     setRecovery(null);
     setRemoval(null);
     setDeleteTargets(null);
     ++reconnectRequest.current;
   }, [library?.id]);
+
+  // Leaving a library stops a native preview still scanning for it; the hook drops that result either way.
+  useEffect(() => () => { void cancelTagRenamePreview(); }, [library?.id, cancelTagRenamePreview]);
 
   const assetsById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -165,6 +288,27 @@ function App() {
     contextMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
     return () => { window.removeEventListener("resize", close); window.removeEventListener("wheel", close, true); document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
   }, [contextTarget]);
+
+  useLayoutEffect(() => {
+    const menu = tagMenuRef.current;
+    if (!tagMenu || !menu) return;
+    const bounds = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(tagMenu.x, window.innerWidth - bounds.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(tagMenu.y, window.innerHeight - bounds.height - 8))}px`;
+  }, [tagMenu]);
+
+  useEffect(() => {
+    if (!tagMenu) return;
+    const close = () => { pendingTagFocus.current = tagMenu.originKey; setTagMenu(null); };
+    const outside = (event: globalThis.MouseEvent) => { if (event.target instanceof Node && !tagMenuRef.current?.contains(event.target)) close(); };
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("resize", close);
+    window.addEventListener("wheel", close, { capture: true, passive: true });
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", escape);
+    tagMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
+    return () => { window.removeEventListener("resize", close); window.removeEventListener("wheel", close, true); document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
+  }, [tagMenu]);
 
   useEffect(() => {
     if (!recovery) return;
@@ -258,6 +402,16 @@ function App() {
     if (!id) return;
     const row = [...(tableScrollRef.current?.querySelectorAll<HTMLTableRowElement>("tr[data-asset-id]") ?? [])].find((item) => item.dataset.assetId === id);
     if (row) { row.focus({ preventScroll: true }); pendingRowFocus.current = null; }
+  });
+
+  // Runs after every render. Waits while busy disables the tag buttons, then focuses the originating action,
+  // or the TAGS header when that tag or group is no longer listed.
+  useLayoutEffect(() => {
+    const key = pendingTagFocus.current;
+    if (!key || busy) return;
+    pendingTagFocus.current = null;
+    const target = [...(appShellRef.current?.querySelectorAll<HTMLElement>("[data-tag-key]") ?? [])].find((item) => item.dataset.tagKey === key);
+    (target ?? tagsHeaderRef.current)?.focus({ preventScroll: true });
   });
   const librarySavedSearches = (savedSearches ?? []).filter((search) => search.libraryId === library?.id);
   const currentFilters: SearchFilters = { query, view, matchMode, kind: kindFilter };
@@ -439,6 +593,7 @@ function App() {
   function openContextMenu(event: MouseEvent<HTMLTableRowElement>, asset: Asset): void {
     event.preventDefault();
     if (busy) return;
+    setTagMenu(null);
     if (!selectedIds.includes(asset.id) || selectedIds.length < 2) {
       setSelectedIds([asset.id]);
       setAnchorId(asset.id);
@@ -453,6 +608,97 @@ function App() {
     const eligible = pool.filter((row) => row.relativePath !== "." && row.status !== "missing" && row.metadataState !== "blocked" && row.metadataRevision);
     if (eligible.length !== pool.length || eligible.length === 0) return;
     setDeleteTargets(eligible);
+  }
+
+  function openTagMenu(origin: HTMLElement, originKey: string, tag: string | null, group: string, x: number, y: number): void {
+    // The dialog is keyed by library, so a second request would reuse it with a draft and review for another rename.
+    if (busy || tagRenameRequest !== null || !library) return;
+    const exactSource = tag === null ? null : renameSource("exact", tag);
+    const prefixSource = tag === null || tag.includes(":") ? renameSource("prefix", group) : null;
+    if (exactSource === null && prefixSource === null) return;
+    setContextTarget(null);
+    setTagMenu({ origin, originKey, exactSource, prefixSource, x, y });
+  }
+
+  function tagMenuProps(originKey: string, tag: string | null, group: string) {
+    return {
+      "data-tag-key": originKey,
+      onContextMenu: (event: MouseEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        const keyboard = keyboardTagMenu.current;
+        if (keyboard && keyboard.origin === event.currentTarget && performance.now() - keyboard.at < 1000) return;
+        keyboardTagMenu.current = null;
+        openTagMenu(event.currentTarget, originKey, tag, group, event.clientX, event.clientY);
+      },
+      // A real pointer press means any later contextmenu event is not the keyboard duplicate.
+      onMouseDown: () => { keyboardTagMenu.current = null; },
+      onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+        const menuKey = event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey);
+        if (!menuKey) return;
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        keyboardTagMenu.current = { origin: event.currentTarget, at: performance.now() };
+        openTagMenu(event.currentTarget, originKey, tag, group, rect.left, rect.bottom);
+      },
+    };
+  }
+
+  function beginTagRename(mode: RenameMode, source: string): void {
+    if (!tagMenu) return;
+    const { origin, originKey } = tagMenu;
+    // Focus the origin while the portal menu is still mounted, so the dialog mounted next captures a live element.
+    if (origin.isConnected && !(origin instanceof HTMLButtonElement && origin.disabled)) origin.focus({ preventScroll: true });
+    else pendingTagFocus.current = originKey;
+    setTagMenu(null);
+    if (busy || tagRenameRequest !== null || !library) return;
+    // Start clean: the dialog shows any error raised while it is open, and closing it dismisses that error.
+    dismissError();
+    setTagRenameRequest({ libraryId: library.id, mode, source, originKey, origin });
+  }
+
+  function closeTagRename(): void {
+    if (!tagRenameRequest) return;
+    // Focus falls back to the TAGS header when the renamed source no longer exists.
+    pendingTagFocus.current = tagRenameRequest.originKey;
+    dismissError();
+    setTagRenameRequest(null);
+  }
+
+  const recordRenameOutcome = useCallback((report: RenameOutcomeReport): void => {
+    // A result for a library that is no longer active belongs to nothing on screen.
+    if (report.result.libraryId !== latestLibraryId.current) return;
+    const key = renameNoticeKey(report.result.mapping);
+    setRenameNotices((current) => {
+      const others = current.filter((notice) => notice.key !== key);
+      return report.result.outcome === "complete" ? others : [...others, { key, libraryId: report.result.libraryId, report }];
+    });
+  }, []);
+
+  function resumeRename(notice: RenameNotice, trigger: HTMLElement): void {
+    if (busy || !library || notice.libraryId !== library.id) return;
+    dismissError();
+    setTagRenameRequest({
+      libraryId: library.id, mode: notice.report.mode, source: notice.report.result.mapping.source,
+      originKey: `rename-notice:${notice.key}`, origin: trigger, resume: notice.report,
+    });
+  }
+
+  function resolveRename(request: TagRenameRequest): void {
+    if (request.resume) {
+      const key = renameNoticeKey(request.resume.result.mapping);
+      setRenameNotices((current) => current.filter((notice) => notice.key !== key));
+    }
+    closeTagRename();
+  }
+
+  function handleTagMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key === "Tab" && tagMenu) { pendingTagFocus.current = tagMenu.originKey; setTagMenu(null); return; }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      items[(index + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+    }
   }
 
   function handleContextMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
@@ -492,13 +738,15 @@ function App() {
     };
   }, [theme]);
 
+  const tagMenuExact = tagMenu?.exactSource ?? null;
+  const tagMenuPrefix = tagMenu?.prefixSource ?? null;
   const noLibrary = !library;
   const hasLibraryChildren = directChildren.length > 0;
   const isEmptyLibrary = Boolean(library) && !hasLibraryChildren && !scanning && !scanStopped && !error;
   const emptyHeadline = loading ? "Loading libraries…" : scanning ? "Scanning library…" : error ? "Scan could not complete" : scanStopped ? "Scan stopped" : noLibrary ? (isDesktop ? "Choose a library to begin" : "Desktop app required") : "No assets found";
 
   return (
-    <div className="app-shell" onKeyDown={(event) => {
+    <div ref={appShellRef} className="app-shell" inert={installingUpdate ? true : undefined} onKeyDown={(event) => {
       if (event.key === "Escape") {
         if (contextTarget) { setContextTarget(null); return; }
         if (!bulkEditing && !savingSearch) { if (bulkTargets) setBulkTargets(null); if (savedSearchDialogOpen) setSavedSearchDialogOpen(false); if (deleteTargets && !deleting) setDeleteTargets(null); }
@@ -525,12 +773,17 @@ function App() {
             <div className="nav-section-label section-between">SAVED SEARCHES <button type="button" className="tiny-icon" title="Save current filters" aria-label="Manage saved searches" disabled={!library || busy} onClick={() => setSavedSearchDialogOpen(true)}><Plus size={14} /></button></div>
             <button type="button" className="nav-hint saved-search-manage" disabled={!library || busy} onClick={() => setSavedSearchDialogOpen(true)}>Save current filters</button>
             {librarySavedSearches.length ? <nav className="saved-search-list" aria-label="Saved searches">{librarySavedSearches.map((search) => <button key={search.id} className="saved-search-item" type="button" onClick={() => loadSavedSearch(search)} disabled={busy} title={`Load ${search.name}`}><Search size={13} /><span>{search.name}</span></button>)}</nav> : <p className="nav-hint">No saved searches for this library.</p>}
-            <div className="nav-section-label section-between">TAGS <span className="section-note">{tagCounts.length} TOTAL</span></div>
+            <div ref={tagsHeaderRef} tabIndex={-1} className="nav-section-label section-between tags-panel-header">TAGS <span className="section-note">{tagCounts.length} TOTAL</span></div>
             <p className="nav-hint">Select a tag to filter assets.</p>
-            {tagGroups.map(([group, tags]) => <div className="tag-group" key={group}>
-              <div className="group-label"><span className="group-swatch" />{group}</div>
-              {tags.map(([tag, count]) => <button className="tag-nav" key={tag} type="button" disabled={busy} onClick={() => addFilter(tag)} title={`Filter by ${tag}`}><span>{tag.includes(":") ? tag.slice(tag.indexOf(":") + 1) : tag}</span><em>{count}</em></button>)}
-            </div>)}
+            {tagGroups.map(([group, tags]) => {
+              // Only a group holding a colon-bearing tag is a prefix group; a lone plain tag stays exact-only.
+              const groupSource = tags.some(([tag]) => tag.includes(":")) ? renameSource("prefix", group) : null;
+              const groupKey = `prefix:${group}`;
+              return <div className="tag-group" key={group}>
+                <div className="group-label"><span className="group-swatch" />{groupSource === null ? group : <button className="group-action" type="button" disabled={busy} aria-haspopup="menu" aria-label={`Actions for prefix group ${groupSource}:`} title={`Rename prefix group ${groupSource}:`} {...tagMenuProps(groupKey, null, group)} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); openTagMenu(event.currentTarget, groupKey, null, group, rect.left, rect.bottom); }}>{group}</button>}</div>
+                {tags.map(([tag, count]) => <button className="tag-nav" key={tag} type="button" disabled={busy} onClick={() => addFilter(tag)} title={`Filter by ${tag}`} {...tagMenuProps(`exact:${tag}`, tag, group)}><span>{tag.includes(":") ? tag.slice(tag.indexOf(":") + 1) : tag}</span><em>{count}</em></button>)}
+              </div>;
+            })}
           </div>
           <div className="sidebar-bottom">
             <div className="offline-note"><span className="offline-dot" /> LOCAL-FIRST <span>·</span> SIDECAR TAGS</div>
@@ -544,7 +797,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           {!sidebarOpen && <span className="collapsed-library-context" title={library?.rootPath}>{library?.name ?? "No library selected"}</span>}
-          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><span className="topbar-version" aria-label={`Application version: ${appVersion}`}>{appVersion}</span><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span></div>
+          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><AppUpdates enabled={isDesktop} blockedReason={updateBlockedReason} getBlockedReason={getUpdateBlockedReason} onInstallingChange={setInstallingUpdate} /><span className="topbar-version" aria-label={`Application version: ${appVersion}`}>{appVersion}</span><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span></div>
         </header>
 
         <div className="page-content">
@@ -561,7 +814,7 @@ function App() {
             <div><small>LAST SCAN</small><strong>{library.lastScanAt ? formatDate(library.lastScanAt) : "Not yet scanned"}</strong></div>
           </div>}
 
-          {error && !removal && <section className="error-panel" role="alert"><div><CircleAlert size={17} /><strong>{error.message}</strong></div>{(error.path || error.details) && <details><summary>Technical details</summary>{error.path && <p className="error-path">{error.path}</p>}{error.details && <pre>{error.details}</pre>}</details>}<button type="button" onClick={dismissError} aria-label="Dismiss error"><X size={15} /></button></section>}
+          {error && !removal && !tagRenameRequest && <section className="error-panel" role="alert"><div><CircleAlert size={17} /><strong>{error.message}</strong></div>{(error.path || error.details) && <details><summary>Technical details</summary>{error.path && <p className="error-path">{error.path}</p>}{error.details && <pre>{error.details}</pre>}</details>}<button type="button" onClick={dismissError} aria-label="Dismiss error"><X size={15} /></button></section>}
           {visibleIssues.length > 0 && library && <details className="issues-panel" key={currentFolder} open={view === "attention"}><summary><CircleAlert size={16} /> Scan issues in this folder <span>{visibleIssues.length} issue{visibleIssues.length === 1 ? "" : "s"}</span></summary><ul>{visibleIssues.map((issue, index) => <li key={`${issue.path}-${index}`}><strong>{issue.message}</strong><code>{issue.path}</code>{issue.details && <details><summary>Details</summary><pre>{issue.details}</pre></details>}</li>)}</ul></details>}
           {isEmptyLibrary && <div className="empty-library-note"><FolderOpen size={16} /><span>This folder is empty. No files or folders at this level.</span></div>}
 
@@ -572,7 +825,20 @@ function App() {
             </div>
             <div className="filter-bar"><label className="search-field"><Search size={18} aria-hidden="true" /><span className="sr-only">Search assets and tags</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={'Tags or "filename / path"... try category:animal -status:printed'} disabled={!library} />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}</label><div className="filter-selector"><span>Match</span><SelectMenu className="filter-menu" label="Required tag match" listLabel="Required tag matching" options={[{ value: "all", label: "All tags" }, { value: "any", label: "Any tag" }]} value={matchMode} onChange={(value) => setMatchMode(value as TagMatchMode)} disabled={!library} /></div><div className="filter-selector"><span>Kind</span><SelectMenu className="filter-menu" label="Asset kind" listLabel="Asset kinds" options={[{ value: "all", label: "Files & folders" }, { value: "file", label: "Files" }, { value: "folder", label: "Folders" }]} value={kindFilter} onChange={(value) => setKindFilter(value as KindFilter)} disabled={!library} /></div><button className="quiet-button save-current-button" type="button" disabled={!library || busy} onClick={() => setSavedSearchDialogOpen(true)}>Save search</button><div className="filter-help"><SlidersHorizontal size={15} /><span>Required tags: {matchMode === "all" ? "all" : "any"}</span></div></div>
             {(query || matchMode !== "all" || kindFilter !== "all") && <div className="active-query"><span>ACTIVE FILTER</span><code>{query || "No tag query"}{matchMode === "any" ? " · any required tag" : " · all required tags"} · {kindFilter === "all" ? "files and folders" : `${kindFilter}s`}</code><button type="button" onClick={() => { setQuery(""); setMatchMode("all"); setKindFilter("all"); }} aria-label="Clear active filter"><X size={13} /></button></div>}
+            {renameNotices.length > 0 && !tagRenameRequest && <section className="rename-pending" aria-label="Unfinished tag renames">{renameNotices.map((notice) => {
+              const { from, to } = renameNames(notice.report);
+              return <div className="rename-pending-item" key={notice.key}>
+                <CircleAlert size={15} aria-hidden="true" />
+                <p>{renameNoticeText(notice.report)}</p>
+                <button type="button" className="quiet-button" data-tag-key={`rename-notice:${notice.key}`} disabled={busy} aria-label={`Review outcome and retry: ${from} to ${to}`} onClick={(event) => resumeRename(notice, event.currentTarget)}>Review outcome and retry</button>
+              </div>;
+            })}</section>}
             {library && selectedIds.length >= 2 && <div className="bulk-action-bar"><span><strong>{selectedIds.length}</strong> selected</span><button className="quiet-button" type="button" disabled={busy || selectedAssets.length !== selectedIds.length} onClick={() => setBulkTargets([...selectedAssets])}><Tag size={15} /> Edit tags in bulk</button><button className="quiet-button bulk-delete-button" type="button" disabled={busy || !isDesktop || selectedAssets.some((asset) => asset.relativePath === "." || asset.status === "missing" || asset.metadataState === "blocked")} onClick={() => { const deletable = selectedAssets.filter((asset) => asset.relativePath !== "." && asset.status !== "missing" && asset.metadataState !== "blocked"); if (deletable.length === selectedAssets.length && deletable.length > 0) setDeleteTargets(deletable); }}><Trash2 size={15} /> Delete selected</button></div>}
+            {tagMenu && createPortal(<div ref={tagMenuRef} className="asset-context-menu tag-rename-menu" role="menu" aria-label={`Actions for ${tagMenu.exactSource !== null ? `tag ${tagMenu.exactSource}` : `prefix group ${tagMenu.prefixSource}:`}`} style={{ left: tagMenu.x, top: tagMenu.y }} onKeyDown={handleTagMenuKeyDown} onMouseDown={(event) => event.stopPropagation()}>
+              <div className="context-menu-title" title={tagMenu.exactSource ?? `${tagMenu.prefixSource}:`}>{tagMenu.exactSource !== null ? `Tag ${tagMenu.exactSource}` : `Prefix group ${tagMenu.prefixSource}:`}</div>
+              {tagMenuExact !== null && <button role="menuitem" type="button" onClick={() => beginTagRename("exact", tagMenuExact)}><Pencil size={14} /><span>Rename tag {tagMenu.exactSource}</span></button>}
+              {tagMenuPrefix !== null && <button role="menuitem" type="button" onClick={() => beginTagRename("prefix", tagMenuPrefix)}><Pencil size={14} /><span>Rename prefix group {tagMenu.prefixSource}:</span></button>}
+            </div>, document.body)}
             {contextTarget && createPortal(<div ref={contextMenuRef} className="asset-context-menu" role="menu" aria-label={`Actions for ${contextTarget.asset.name}`} style={{ left: contextTarget.x, top: contextTarget.y }} onKeyDown={handleContextMenuKeyDown} onMouseDown={(event) => event.stopPropagation()}><div className="context-menu-title" title={contextTarget.asset.relativePath}>{contextTarget.asset.name}</div>{contextTarget.asset.status === "missing" ? <><button role="menuitem" type="button" disabled title="Missing asset cannot be opened"><ExternalLink size={14} /> Open</button><button role="menuitem" type="button" disabled title="Missing asset cannot be revealed"><FolderSearch size={14} /> Reveal</button><button role="menuitem" type="button" disabled title="Full path unavailable for missing asset"><Copy size={14} /> Copy full path</button><button role="menuitem" type="button" disabled title="File actions unavailable for missing asset"><Copy size={14} /> Copy relative path</button><button role="menuitem" type="button" onClick={() => void beginReconnect(contextTarget.asset)} disabled={busy || contextTarget.asset.metadataState !== "valid" || !contextTarget.asset.metadataId || !contextTarget.asset.metadataRevision}><Wrench size={14} /> Reconnect metadata</button><button role="menuitem" type="button" className="context-danger" onClick={() => beginRemoveMissing(contextTarget.asset)} disabled={busy || contextTarget.asset.metadataState !== "valid" || !contextTarget.asset.metadataId || !contextTarget.asset.metadataRevision}><Trash2 size={14} /> Remove missing entry</button><p>Missing asset cannot be opened, revealed, or copied by its full path.</p></> : <><button role="menuitem" type="button" disabled={busy || !isDesktop} onClick={() => void runAction(contextTarget.asset, "open")}><ExternalLink size={14} /> Open</button><button role="menuitem" type="button" disabled={busy || !isDesktop} onClick={() => void runAction(contextTarget.asset, "reveal")}><FolderSearch size={14} /> Reveal in {navigator.platform.toLowerCase().includes("mac") ? "Finder" : "File Explorer"}</button><button role="menuitem" type="button" disabled={busy || !isDesktop} onClick={() => void runAction(contextTarget.asset, "copyFullPath")}><Copy size={14} /> Copy full path</button><button role="menuitem" type="button" disabled={busy} onClick={() => { void copyRelativePath(contextTarget.asset); setContextTarget(null); }}><Copy size={14} /> Copy relative path</button><button role="menuitem" type="button" className="context-danger" onClick={() => requestDelete(contextTarget.asset, true)} disabled={busy || !isDesktop}><Trash2 size={14} /> Delete{selectedIds.length >= 2 && selectedIds.includes(contextTarget.asset.id) ? ` ${selectedIds.length} items` : ""}</button></>}</div>, document.body)}
             {exportResult && <div className="operation-notice" role="status"><strong>JSON backup exported</strong><code title={exportResult.path}>{exportResult.path}</code><span>{exportResult.assetCount} metadata item{exportResult.assetCount === 1 ? "" : "s"} included.</span></div>}
             {scanning && <div className="scan-progress" role="status"><span className="progress-spinner" /><span>Scanning library…</span><strong>{progress.toLocaleString()} entries visited</strong><button type="button" className="scan-cancel-button" onClick={() => void cancelScan()} aria-label="Stop scanning" title="Stop scanning"><X size={14} /> Stop</button></div>}
@@ -590,6 +856,18 @@ function App() {
       {savedSearchDialogOpen && <SavedSearchDialog filters={currentFilters} searches={librarySavedSearches} busy={savingSearch} onCancel={() => setSavedSearchDialogOpen(false)} onSave={saveSearch} onDelete={async (search) => { const deleted = await deleteSearch(search.id); if (deleted) setSavedSearchDialogOpen(false); return deleted; }} />}
       {removal && <RemoveMissingEntryDialog asset={removal.asset} busy={recoveryBusy} error={error} onCancel={() => setRemoval(null)} onConfirm={confirmRemoveMissing} />}
       {recovery && <RecoveryDialog source={recovery.source} targets={recovery.targets} busy={recoveryBusy} onCancel={() => setRecovery(null)} onConfirm={confirmReconnect} />}
+      {tagRenameRequest && tagRenameRequest.libraryId === library?.id && (
+        <TagRenameDialog
+          key={tagRenameRequest.libraryId}
+          mode={tagRenameRequest.mode} source={tagRenameRequest.source} libraryId={tagRenameRequest.libraryId}
+          activeFilters={currentFilters} savedSearches={librarySavedSearches}
+          previewing={renamePreviewing} applying={renameApplying} progress={renameProgress} error={error}
+          onPreview={previewTagRename} onCancelPreview={cancelTagRenamePreview}
+          onApply={(previewId) => applyTagRename(previewId, { read: () => latestQuery.current, write: setQuery })}
+          onClose={closeTagRename} onOutcome={recordRenameOutcome}
+          resume={tagRenameRequest.resume} onResolve={tagRenameRequest.resume ? () => resolveRename(tagRenameRequest) : undefined}
+        />
+      )}
       {deleteTargets && <DeleteAssetsDialog assets={deleteTargets} busy={deleting} onCancel={() => setDeleteTargets(null)} onConfirm={async (assets) => { const applied = await deleteAssets(assets); if (applied) { setDeleteTargets(null); setSelectedIds([]); setAnchorId(null); } return applied; }} />}
     </div>
   );

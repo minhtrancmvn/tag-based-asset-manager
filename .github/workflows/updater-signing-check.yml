@@ -1,0 +1,170 @@
+name: Updater signing check
+
+# Dedicated-branch credential check only. No checkout, app build, release or feed writes.
+on:
+  push:
+    branches: [ci/updater-signing-check]
+
+permissions: {}
+
+concurrency:
+  group: updater-signing-check
+  cancel-in-progress: true
+
+jobs:
+  signing:
+    if: >-
+      github.repository == 'minhtrancmvn/tag-based-asset-manager' &&
+      github.ref == 'refs/heads/ci/updater-signing-check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      CHECK_DIR: ${{ github.workspace }}/updater-signing-check
+      PROBE_VERSION: '0.0.0'
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Prepare pinned signer and inert payload
+        run: |
+          node --input-type=module <<'PREPARE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { mkdirSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          assert.ok(process.env.TAURI_UPDATER_PUBLIC_KEY?.trim(), 'Updater public key is missing');
+          const directory = process.env.CHECK_DIR;
+          mkdirSync(directory, { mode: 0o700 });
+          const response = await fetch('https://registry.npmjs.org/@tauri-apps/cli-linux-x64-gnu/-/cli-linux-x64-gnu-2.12.1.tgz', { signal: AbortSignal.timeout(30_000) });
+          assert.ok(response.ok, 'Pinned signer download failed');
+          const archive = Buffer.from(await response.arrayBuffer());
+          // Exact integrity from pnpm-lock.yaml; no dependency scripts or caches.
+          const expected = 'sha512-Z1QGPr49HJZMktu+Spu6Q1b/f9ANadXvqZZZt2645ua1x1ev6prOgp85eiGv2jRzohFEMLo6aJyaLjLUX5KIvA==';
+          assert.equal(`sha512-${createHash('sha512').update(archive).digest('base64')}`, expected, 'Pinned signer integrity mismatch');
+          writeFileSync(join(directory, 'signer.tgz'), archive, { flag: 'wx', mode: 0o600 });
+          writeFileSync(join(directory, 'probe.txt'), JSON.stringify({
+            purpose: 'Updater credential check only; not an application or update',
+            repository: process.env.GITHUB_REPOSITORY,
+            sha: process.env.GITHUB_SHA,
+            run_id: process.env.GITHUB_RUN_ID,
+            run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+          }) + '\n', { flag: 'wx', mode: 0o600 });
+          PREPARE
+          tar -xzf "$CHECK_DIR/signer.tgz" -C "$CHECK_DIR" --strip-components=1 package/cli.linux-x64-gnu.node
+
+      - name: Sign inert payload
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          node --input-type=module <<'SIGN'
+          import { spawnSync } from 'node:child_process';
+          import { existsSync } from 'node:fs';
+          import { join } from 'node:path';
+          if (!process.env.TAURI_SIGNING_PRIVATE_KEY || !process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+            throw new Error('Required signing secrets are missing');
+          }
+          const payload = join(process.env.CHECK_DIR, 'probe.txt');
+          const native = join(process.env.CHECK_DIR, 'cli.linux-x64-gnu.node');
+          const entry = "require(process.argv[1]).run(['signer', 'sign', '--app-version', process.env.PROBE_VERSION, process.argv[2]], 'updater-signing-check', (error) => { if (error) process.exitCode = 1; });";
+          const result = spawnSync(process.execPath, ['-e', entry, native, payload], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 60_000,
+            maxBuffer: 1024 * 1024,
+          });
+          // Do not print captured output: even signer failure diagnostics stay private.
+          if (result.error || result.status !== 0 || !existsSync(`${payload}.sig`)) {
+            throw new Error('Signing check failed; verify repository signing secrets privately');
+          }
+          SIGN
+
+      - name: Verify signature and negative cases
+        run: |
+          node --input-type=module <<'VERIFY'
+          import assert from 'node:assert/strict';
+          import { createHash, createPublicKey, verify } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { TextDecoder } from 'node:util';
+          const utf8 = new TextDecoder('utf-8', { fatal: true });
+          const decode = (text) => {
+            assert.match(text, /^[A-Za-z0-9+/]+={0,2}$/);
+            const bytes = Buffer.from(text, 'base64');
+            assert.equal(bytes.toString('base64'), text, 'Noncanonical base64');
+            return bytes;
+          };
+          const keyText = utf8.decode(decode(process.env.TAURI_UPDATER_PUBLIC_KEY.trim()));
+          const keyLines = keyText.split(/\r?\n/);
+          assert.ok(keyLines[0].startsWith('untrusted comment:'));
+          const key = decode(keyLines[1]);
+          assert.equal(key.length, 42);
+          assert.ok(key.subarray(0, 2).equals(Buffer.from('Ed')) || key.subarray(0, 2).equals(Buffer.from('ED')));
+          const publicKey = createPublicKey({
+            key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), key.subarray(10)]),
+            format: 'der', type: 'spki',
+          });
+          const payload = readFileSync(join(process.env.CHECK_DIR, 'probe.txt'));
+          const signatureFile = readFileSync(join(process.env.CHECK_DIR, 'probe.txt.sig'));
+          const signatureText = utf8.decode(decode(signatureFile.toString('utf8').trim()));
+          const lines = signatureText.split(/\r?\n/);
+          if (lines.at(-1) === '') lines.pop();
+          assert.equal(lines.length, 4);
+          assert.ok(lines[0].startsWith('untrusted comment:'));
+          assert.ok(lines[2].startsWith('trusted comment: '));
+          const signature = decode(lines[1]);
+          const globalSignature = decode(lines[3]);
+          assert.equal(signature.length, 74);
+          assert.equal(globalSignature.length, 64);
+          assert.ok(signature.subarray(2, 10).equals(key.subarray(2, 10)), 'Signing key differs from configured public key');
+          const algorithm = signature.subarray(0, 2).toString('ascii');
+          assert.ok(algorithm === 'Ed' || algorithm === 'ED');
+          const digest = (data) => algorithm === 'ED' ? createHash('blake2b512').update(data).digest() : data;
+          const primary = signature.subarray(10);
+          const comment = lines[2].slice('trusted comment: '.length);
+          const signedVersion = comment.split('\t').find((field) => field.startsWith('version:'))?.slice('version:'.length);
+          assert.equal(signedVersion, process.env.PROBE_VERSION, 'Signed version mismatch');
+          assert.equal(verify(null, digest(payload), publicKey, primary), true, 'Payload signature failed');
+          assert.equal(verify(null, Buffer.concat([primary, Buffer.from(comment)]), publicKey, globalSignature), true, 'Authenticated comment failed');
+          const alteredPayload = Buffer.from(payload);
+          alteredPayload[0] ^= 1;
+          assert.equal(verify(null, digest(alteredPayload), publicKey, primary), false);
+          const alteredPrimary = Buffer.from(primary);
+          alteredPrimary[0] ^= 1;
+          assert.equal(verify(null, digest(payload), publicKey, alteredPrimary), false);
+          assert.equal(verify(null, Buffer.concat([primary, Buffer.from(`${comment}\ttampered:true`)]), publicKey, globalSignature), false);
+          assert.throws(() => assert.equal(signedVersion, `${process.env.PROBE_VERSION}-mismatch`));
+          const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+          writeFileSync(join(process.env.CHECK_DIR, 'verification.json'), JSON.stringify({
+            repository: process.env.GITHUB_REPOSITORY,
+            sha: process.env.GITHUB_SHA,
+            run_id: process.env.GITHUB_RUN_ID,
+            run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+            signer_version: '2.12.1',
+            version: signedVersion,
+            public_key_sha256: sha256(process.env.TAURI_UPDATER_PUBLIC_KEY.trim()),
+            payload_sha256: sha256(payload),
+            signature_sha256: sha256(signatureFile),
+            payload_verified: true,
+            global_signature_verified: true,
+            tampered_payload_rejected: true,
+            tampered_signature_rejected: true,
+            tampered_comment_rejected: true,
+            version_mismatch_rejected: true,
+            published: false,
+          }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+          console.log('Signature matches configured public key; version binding and tamper rejection verified. No application built, installed or published.');
+          VERIFY
+
+      - name: Preserve nonsecret verification evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: updater-signing-verification
+          path: ${{ env.CHECK_DIR }}/verification.json
+          retention-days: 7
+          if-no-files-found: error

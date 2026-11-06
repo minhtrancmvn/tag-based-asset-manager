@@ -1,0 +1,693 @@
+{
+  "version": 1,
+  "description": "TypeScript-only tag-rename query rewrite cases (mappings are already normalized). Tokenization and roles follow parseQuery in src/catalog.ts: only unquoted tag tokens are replaced (required token value = token.trim().toLowerCase(); excluded token keeps its leading '-'); quoted phrases, negative quoted text and every other byte stay unchanged. Exact mapping replaces a value equal to source; prefix mapping replaces a value starting with source+':'. The mapped value (lowercase) replaces the whole token. A rewrite is valid only if parseQuery(rewritten) deep-equals parseQuery(original) with requiredTags/excludedTags passed through the mapping and text unchanged; otherwise expected.error gives the first input token whose individual rewrite fails and a reason (precedence: whitespace /\\s/, quote-leading, leading-minus for required tokens, role-change). U+FEFF is a query separator (JS \\s) but U+0085 is not.",
+  "cases": [
+    {
+      "id": "prefix-basic",
+      "query": "status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-multiple-tokens-and-case-insensitive",
+      "query": "status:printed Status:Queued color:red",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:printed state:queued color:red",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-exclusion",
+      "query": "-status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "-state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-exclusion-uppercase-keeps-sign",
+      "query": "-Status:PRINTED color:red",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "-state:printed color:red",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-required-and-excluded-mixed",
+      "query": "status:a -status:b color:c -color:d",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:a -state:b color:c -color:d",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-nested-colon-suffix",
+      "query": "status:printed:large -status:a:b:c",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:printed:large -state:a:b:c",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-colon-only-tag",
+      "query": "status:",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:",
+        "changed": true
+      }
+    },
+    {
+      "id": "prefix-plain-name-not-renamed",
+      "query": "status -status",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "status -status",
+        "changed": false
+      }
+    },
+    {
+      "id": "prefix-partial-names-do-not-match",
+      "query": "statusx:y xstatus:y -statusx:y -xstatus:y",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "statusx:y xstatus:y -statusx:y -xstatus:y",
+        "changed": false
+      }
+    },
+    {
+      "id": "no-match-query",
+      "query": "color:red \"some phrase\" -kind:model",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "color:red \"some phrase\" -kind:model",
+        "changed": false
+      }
+    },
+    {
+      "id": "empty-query",
+      "query": "",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "",
+        "changed": false
+      }
+    },
+    {
+      "id": "whitespace-only-query",
+      "query": "  \t\n ",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "  \t\n ",
+        "changed": false
+      }
+    },
+    {
+      "id": "exact-basic",
+      "query": "favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "starred"
+      },
+      "expected": {
+        "query": "starred",
+        "changed": true
+      }
+    },
+    {
+      "id": "exact-case-insensitive",
+      "query": "Favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "starred"
+      },
+      "expected": {
+        "query": "starred",
+        "changed": true
+      }
+    },
+    {
+      "id": "exact-exclusion",
+      "query": "-FAVORITE color:red",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "starred"
+      },
+      "expected": {
+        "query": "-starred color:red",
+        "changed": true
+      }
+    },
+    {
+      "id": "exact-does-not-match-prefix-or-partial",
+      "query": "favorite:x favoritex xfavorite -favorites",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "starred"
+      },
+      "expected": {
+        "query": "favorite:x favoritex xfavorite -favorites",
+        "changed": false
+      }
+    },
+    {
+      "id": "exact-compound-name",
+      "query": "status:printed status:printed:large Status:Printed",
+      "mapping": {
+        "mode": "exact",
+        "source": "status:printed",
+        "destination": "state:done"
+      },
+      "expected": {
+        "query": "state:done status:printed:large state:done",
+        "changed": true
+      }
+    },
+    {
+      "id": "quoted-phrase-containing-source-unchanged",
+      "query": "\"status:printed\" status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\"status:printed\" state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "smart-quoted-phrase-containing-source-unchanged",
+      "query": "\u201cstatus:printed\u201d status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\u201cstatus:printed\u201d state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "quoted-phrase-with-spaces-unchanged",
+      "query": "\"my status:printed thing\" status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\"my status:printed thing\" state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "mixed-ascii-open-smart-close",
+      "query": "\"status:b\u201d status:x",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\"status:b\u201d state:x",
+        "changed": true
+      }
+    },
+    {
+      "id": "mixed-smart-open-ascii-close",
+      "query": "\u201cstatus:b\" status:x",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\u201cstatus:b\" state:x",
+        "changed": true
+      }
+    },
+    {
+      "id": "ascii-phrase-containing-smart-pair",
+      "query": "\"a \u201cstatus:b\u201d c\" status:x",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\"a \u201cstatus:b\u201d c\" state:x",
+        "changed": true
+      }
+    },
+    {
+      "id": "smart-phrase-with-ascii-quotes-leaves-outside-tags-rewritable",
+      "query": "\u201ca \"status:b\" c\u201d status:x",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\u201ca \"state:b\" c\u201d state:x",
+        "changed": true
+      }
+    },
+    {
+      "id": "negative-quoted-text-unchanged",
+      "query": "-\"status:printed\" -status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "-\"status:printed\" -state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "negative-smart-quoted-text-unchanged",
+      "query": "-\u201cstatus:printed\u201d status:printed",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "-\u201cstatus:printed\u201d state:printed",
+        "changed": true
+      }
+    },
+    {
+      "id": "unclosed-quote-token-is-not-a-tag-match",
+      "query": "status:a \"status:b",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:a \"status:b",
+        "changed": true
+      }
+    },
+    {
+      "id": "separators-tab-newline-feff-nbsp-2028-3000",
+      "query": "status:a\tstatus:b\nstatus:c\ufeffstatus:d\u00a0status:e\u2028status:f\u3000-status:g",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:a\tstate:b\nstate:c\ufeffstate:d\u00a0state:e\u2028state:f\u3000-state:g",
+        "changed": true
+      }
+    },
+    {
+      "id": "leading-and-trailing-whitespace-preserved",
+      "query": "\u00a0 \ufeffstatus:a \u2028\n",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\u00a0 \ufeffstate:a \u2028\n",
+        "changed": true
+      }
+    },
+    {
+      "id": "u0085-is-not-a-query-separator-inside-token",
+      "query": "status:a\u0085status:b status:c",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:a\u0085status:b state:c",
+        "changed": true
+      }
+    },
+    {
+      "id": "u0085-at-token-start-does-not-match",
+      "query": "\u0085status:a x\u0085status:b",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "\u0085status:a x\u0085status:b",
+        "changed": false
+      }
+    },
+    {
+      "id": "astral-prefix-names",
+      "query": "📦:large -📦:small 📦",
+      "mapping": {
+        "mode": "prefix",
+        "source": "📦",
+        "destination": "🎁"
+      },
+      "expected": {
+        "query": "🎁:large -🎁:small 📦",
+        "changed": true
+      }
+    },
+    {
+      "id": "astral-suffix-and-text",
+      "query": "status:📦 \"status:😀\" -status:😀x",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "state"
+      },
+      "expected": {
+        "query": "state:📦 \"status:😀\" -state:😀x",
+        "changed": true
+      }
+    },
+    {
+      "id": "astral-destination",
+      "query": "Favorite -favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "🌟"
+      },
+      "expected": {
+        "query": "🌟 -🌟",
+        "changed": true
+      }
+    },
+    {
+      "id": "astral-lowercase-source-match",
+      "query": "𐐀X 𐐨x 𐐀Y",
+      "mapping": {
+        "mode": "exact",
+        "source": "𐐨x",
+        "destination": "y"
+      },
+      "expected": {
+        "query": "y y 𐐀Y",
+        "changed": true
+      }
+    },
+    {
+      "id": "excluded-double-minus-destination-is-representable",
+      "query": "-favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "-fav"
+      },
+      "expected": {
+        "query": "--fav",
+        "changed": true
+      }
+    },
+    {
+      "id": "trailing-quote-destination-is-representable",
+      "query": "favorite x",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "fav\""
+      },
+      "expected": {
+        "query": "fav\" x",
+        "changed": true
+      }
+    },
+    {
+      "id": "lone-leading-quote-destination-is-representable-without-other-quotes",
+      "query": "favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "\"fav"
+      },
+      "expected": {
+        "query": "\"fav",
+        "changed": true
+      }
+    },
+    {
+      "id": "leading-minus-prefix-ok-for-excluded-tokens",
+      "query": "-status:a",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "-x"
+      },
+      "expected": {
+        "query": "--x:a",
+        "changed": true
+      }
+    },
+    {
+      "id": "error-whitespace-space-destination",
+      "query": "color:red status:x",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "my state"
+      },
+      "expected": {
+        "error": {
+          "reason": "whitespace",
+          "token": "status:x"
+        }
+      }
+    },
+    {
+      "id": "error-whitespace-nbsp-destination",
+      "query": "favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "a\u00a0b"
+      },
+      "expected": {
+        "error": {
+          "reason": "whitespace",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-whitespace-feff-destination",
+      "query": "color:red favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "a\ufeffb"
+      },
+      "expected": {
+        "error": {
+          "reason": "whitespace",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-whitespace-tab-destination-excluded-token",
+      "query": "-favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "a\tb"
+      },
+      "expected": {
+        "error": {
+          "reason": "whitespace",
+          "token": "-favorite"
+        }
+      }
+    },
+    {
+      "id": "error-whitespace-wins-over-quote-leading",
+      "query": "favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "\"a b"
+      },
+      "expected": {
+        "error": {
+          "reason": "whitespace",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-quote-leading-ascii",
+      "query": "favorite \"x\"",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "\"fav"
+      },
+      "expected": {
+        "error": {
+          "reason": "quote-leading",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-quote-leading-smart",
+      "query": "favorite \u201cx\u201d",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "\u201cfav"
+      },
+      "expected": {
+        "error": {
+          "reason": "quote-leading",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-quote-leading-excluded-token",
+      "query": "-favorite \"x\"",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "\"fav"
+      },
+      "expected": {
+        "error": {
+          "reason": "quote-leading",
+          "token": "-favorite"
+        }
+      }
+    },
+    {
+      "id": "error-leading-minus-required-token",
+      "query": "favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "-fav"
+      },
+      "expected": {
+        "error": {
+          "reason": "leading-minus",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-first-failing-token-is-not-first-matching-token",
+      "query": "-status:a status:b",
+      "mapping": {
+        "mode": "prefix",
+        "source": "status",
+        "destination": "-x"
+      },
+      "expected": {
+        "error": {
+          "reason": "leading-minus",
+          "token": "status:b"
+        }
+      }
+    },
+    {
+      "id": "error-role-change-mid-value-quote",
+      "query": "\"open favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "a\"b"
+      },
+      "expected": {
+        "error": {
+          "reason": "role-change",
+          "token": "favorite"
+        }
+      }
+    },
+    {
+      "id": "error-role-change-mid-value-smart-quote",
+      "query": "\u201copen favorite",
+      "mapping": {
+        "mode": "exact",
+        "source": "favorite",
+        "destination": "a\u201db"
+      },
+      "expected": {
+        "error": {
+          "reason": "role-change",
+          "token": "favorite"
+        }
+      }
+    }
+  ]
+}

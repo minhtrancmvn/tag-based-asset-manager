@@ -283,3 +283,54 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { color: var
 .search-field input:disabled { color: var(--muted); background: transparent; }
 .primary-button:disabled { color: var(--disabled-ink); background: var(--disabled-bg); border-color: var(--line); }
 .asset-table tr.selected-row td { color: var(--selection-ink); }
+
+/* Tag rename dialog (T12). Tokens only; appended so later tasks can add rules after it. */
+.rename-dialog { width: min(100%, 640px); }
+.rename-dialog .workflow-dialog-heading { margin-bottom: 14px; }
+.rename-mapping { margin: 0; color: var(--ink); font: 400 10px/1.5 "IBM Plex Mono", monospace; overflow-wrap: anywhere; }
+.rename-note { margin: 0; padding: 9px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--ink); font-size: 10px; line-height: 1.5; }
+.rename-notice, .rename-blockers { display: grid; gap: 6px; overflow-wrap: anywhere; }
+.rename-blockers ul { display: grid; margin: 0; padding-left: 18px; gap: 4px; }
+.rename-blockers p, .rename-notice p { margin: 0; }
+.rename-native-detail { display: block; margin-top: 4px; font: 400 9px/1.5 "IBM Plex Mono", monospace; }
+.rename-busy { display: flex; align-items: center; padding: 9px 10px; gap: 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); font-size: 10px; }
+.rename-busy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.rename-review, .rename-confirm, .rename-outcome { display: grid; padding: 11px; gap: 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); }
+.rename-review > h3, .rename-confirm > h3, .rename-outcome > h3 { margin: 0; color: var(--ink); font-family: "Barlow Condensed", sans-serif; font-size: 18px; font-weight: 600; }
+.rename-review > h3:focus-visible, .rename-confirm > h3:focus-visible, .rename-outcome > h3:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.rename-review p, .rename-confirm p, .rename-outcome p { margin: 0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.rename-review code, .rename-outcome code { overflow-wrap: anywhere; font: 400 10px "IBM Plex Mono", monospace; }
+.rename-scope { color: var(--muted); }
+.rename-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); margin: 0; gap: 8px; }
+.rename-counts > div { display: grid; padding: 8px 10px; gap: 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); }
+.rename-counts dt { color: var(--muted); font-size: 9px; }
+.rename-counts dd { margin: 0; color: var(--ink); font: 500 16px "IBM Plex Mono", monospace; }
+.rename-search-list { display: grid; margin: 0; padding-left: 18px; gap: 3px; font-size: 10px; overflow-wrap: anywhere; }
+.rename-subsection { display: grid; gap: 6px; }
+.rename-subsection > h4 { margin: 0; color: var(--ink); font-size: 10px; font-weight: 600; }
+.rename-list { display: grid; justify-items: start; gap: 6px; }
+.rename-list-scroll { width: 100%; max-height: 150px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); }
+.rename-list-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.rename-list-scroll ul { margin: 0; padding: 0; list-style: none; }
+.rename-list-scroll li { display: grid; padding: 6px 9px; gap: 2px; border-bottom: 1px solid var(--line); }
+.rename-list-scroll li:last-child { border-bottom: 0; }
+.rename-path { overflow-wrap: anywhere; color: var(--ink); font: 400 10px "IBM Plex Mono", monospace; }
+.rename-list-scroll em { color: var(--muted); font-size: 9px; font-style: normal; }
+.rename-outcome .bulk-warning, .rename-confirm .bulk-warning, .rename-review .bulk-warning { display: grid; gap: 4px; }
+
+/* Sidebar tag rename menus and focus targets (T13). */
+.tag-rename-menu { width: min(280px, calc(100vw - 16px)); }
+.tag-rename-menu button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-rename-menu button svg { flex: 0 0 auto; }
+.group-label .group-action { flex: 1; min-width: 0; padding: 0; overflow: hidden; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.group-label .group-action:hover:not(:disabled) { text-decoration: underline; }
+.group-label .group-action:disabled { color: var(--disabled-ink); }
+.tags-panel-header:focus-visible { outline: 2px solid var(--sidebar-text); outline-offset: 2px; }
+
+/* Persistent unfinished-rename notice (T14). */
+.rename-pending { display: grid; border-bottom: 1px solid var(--line); background: var(--error-bg); color: var(--error-ink); }
+.rename-pending-item { display: flex; align-items: center; flex-wrap: wrap; padding: 8px 14px; gap: 9px; font-size: 10px; line-height: 1.5; }
+.rename-pending-item + .rename-pending-item { border-top: 1px solid var(--error-line); }
+.rename-pending-item svg { flex: 0 0 auto; }
+.rename-pending-item p { flex: 1 1 260px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.rename-pending-item .quiet-button { border-color: var(--error-line); color: inherit; }

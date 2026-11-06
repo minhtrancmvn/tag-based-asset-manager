@@ -1,9 +1,131 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LibraryClient } from "./native";
 import { nativeClient, toAppError } from "./native";
-import type { AppError, AppTheme, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, ScanIssue, ScanResult, SearchFilters, ValidationReport } from "./types";
+import { deriveRenameMigration, normalizeRenameMapping } from "./tagRename";
+import type { RenameBlocker, RenameMappingError, RenameMigration } from "./tagRename";
+import type {
+  AppError, AppTheme, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, RenameApplyResult, RenameDiscardReason,
+  RenameMapping, RenameMode, RenamePreview, RenamePreviewRequest, RenameTargetSummary, SavedSearch, ScanIssue, ScanResult, SearchFilters, ValidationReport,
+} from "./types";
 
 const emptyState: LibraryState = { libraries: [], activeLibraryId: null };
+
+export interface RenamePreviewInput {
+  mode: RenameMode;
+  /** Raw names as typed; native normalizes them and must agree with the mapping this hook derives. */
+  source: string;
+  destination: string;
+  /** Filters the user currently has applied. The query is captured here for the completion compare-and-set. */
+  activeFilters: SearchFilters;
+}
+
+/** Access to the session-owned active query. The hook reads it again at completion and writes only if unchanged. */
+export interface ActiveQueryBinding {
+  read: () => string;
+  write: (query: string) => void;
+}
+
+export type RenamePreviewResult =
+  | { status: "ready"; preview: RenamePreview; migration: RenameMigration }
+  | { status: "cancelled" }
+  | { status: "discarded"; reason: RenameDiscardReason }
+  | { status: "invalid"; error: RenameMappingError }
+  | { status: "blocked"; blockers: RenameBlocker[] }
+  /** Another native operation is running, no desktop library is active or there is no matching preview. */
+  | { status: "unavailable" }
+  /** The library, generation or component changed while the request ran; nothing was applied. */
+  | { status: "stale" }
+  /** A native or validation error was recorded in the hook error state. */
+  | { status: "failed" };
+
+export type RenameApplyHookResult =
+  | { status: "applied"; result: RenameApplyResult; queryUpdated: boolean }
+  | { status: "unavailable" }
+  | { status: "stale" }
+  | { status: "failed" };
+
+interface PendingRename {
+  previewId: string;
+  libraryId: string;
+  mapping: RenameMapping;
+  targets: RenameTargetSummary[];
+  migration: RenameMigration;
+}
+
+interface ActiveRename {
+  kind: "preview" | "apply";
+  libraryId: string;
+  scanId: string;
+  cancelled: boolean;
+}
+
+function renameFailure(message: string): never {
+  throw new Error(message);
+}
+
+function sameMapping(left: RenameMapping, right: RenameMapping): boolean {
+  return left.mode === right.mode && left.source === right.source && left.destination === right.destination;
+}
+
+function uniqueBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T> {
+  const map = new Map(items.map((item) => [key(item), item]));
+  if (map.size !== items.length) renameFailure("Rename response repeated a row.");
+  return map;
+}
+
+/** Throws unless a native preview is exactly the response to `request`. */
+function validateRenamePreview(preview: RenamePreview, request: RenamePreviewRequest): void {
+  if (typeof preview.previewId !== "string" || preview.previewId === "") renameFailure("Rename preview has no preview ID.");
+  if (preview.libraryId !== request.libraryId || preview.scanId !== request.scanId) renameFailure("Rename preview did not match the requested library.");
+  if (preview.scan.libraryId !== request.libraryId || preview.scan.scanId !== request.scanId) renameFailure("Rename preview catalog did not match the requested scan.");
+  if (!sameMapping(preview.mapping, request.normalizedMapping)) renameFailure("Rename preview did not match the requested mapping.");
+  const rows = uniqueBy(preview.scan.assets, (asset) => asset.id);
+  for (const target of uniqueBy(preview.targets, (item) => item.assetId).values()) {
+    const row = rows.get(target.assetId);
+    if (!row || row.relativePath !== target.relativePath || row.kind !== target.kind) renameFailure("Rename preview target did not match the preview catalog.");
+  }
+  if (preview.savedSearchUpdateCount !== request.savedSearchReplacements.length) renameFailure("Rename preview did not bind the requested saved searches.");
+}
+
+/** Throws unless a native apply result is internally consistent and answers the preview that was applied. */
+function validateRenameApply(result: RenameApplyResult, pending: PendingRename, currentSearches: readonly SavedSearch[]): void {
+  if (result.previewId !== pending.previewId || result.libraryId !== pending.libraryId) renameFailure("Rename result did not match the applied preview.");
+  if (!sameMapping(result.mapping, pending.mapping)) renameFailure("Rename result did not match the previewed mapping.");
+  const requested = uniqueBy(pending.targets, (target) => target.assetId);
+  const seen = new Set<string>();
+  const claim = (assetId: string, relativePath: string, kind: string): void => {
+    const target = requested.get(assetId);
+    if (!target || target.relativePath !== relativePath || target.kind !== kind) renameFailure("Rename result named a row that was not requested.");
+    if (seen.has(assetId)) renameFailure("Rename result placed a row in more than one partition.");
+    seen.add(assetId);
+  };
+  for (const asset of result.committed) claim(asset.id, asset.relativePath, asset.kind);
+  for (const target of result.failed) claim(target.assetId, target.relativePath, target.kind);
+  for (const target of result.unattempted) claim(target.assetId, target.relativePath, target.kind);
+  if (seen.size !== requested.size) renameFailure("Rename result omitted requested rows.");
+
+  const unapplied = result.failed.length + result.unattempted.length;
+  switch (result.outcome) {
+    case "complete":
+      if (unapplied > 0 || result.error !== null || !result.queryMigrated) renameFailure("Rename result outcome contradicted its rows.");
+      break;
+    case "partial":
+      if (unapplied === 0 || result.queryMigrated) renameFailure("Rename result outcome contradicted its rows.");
+      break;
+    case "settings-failed":
+      if (unapplied > 0 || result.error === null || result.queryMigrated) renameFailure("Rename result outcome contradicted its rows.");
+      break;
+    default:
+      renameFailure("Rename result has an unknown outcome.");
+  }
+
+  const known = new Set(currentSearches.filter((search) => search.libraryId === pending.libraryId).map((search) => search.id));
+  const returned = new Set<string>();
+  for (const search of result.savedSearches) {
+    if (search.libraryId !== pending.libraryId || !known.has(search.id) || returned.has(search.id)) renameFailure("Rename result named a saved search outside the active library.");
+    returned.add(search.id);
+  }
+}
 
 export function useLibrary(client: LibraryClient = nativeClient) {
   const [state, setState] = useState<LibraryState>(emptyState);
@@ -24,12 +146,17 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [deleting, setDeleting] = useState(false);
   const [validation, setValidation] = useState<ValidationReport | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const [renamePreviewing, setRenamePreviewing] = useState(false);
+  const [renameApplying, setRenameApplying] = useState(false);
+  const [renameProgress, setRenameProgress] = useState(0);
   const scanBusy = useRef(false);
   const activeScan = useRef<{ libraryId: string; scanId: string; cancelled: boolean } | null>(null);
   const mounted = useRef(false);
   const stateRef = useRef(emptyState);
   const scanGeneration = useRef(0);
   const operation = useRef(false);
+  const activeRename = useRef<ActiveRename | null>(null);
+  const pendingRename = useRef<PendingRename | null>(null);
 
   const scan = useCallback(async (libraryId: string) => {
     const generation = ++scanGeneration.current;
@@ -382,6 +509,129 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     const result = await client.previewAsset(libraryId, asset.id);
     return mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId ? result : null;
   }, [client]);
+  useEffect(() => () => {
+    // Unmount has no error surface. Cancellation is best effort; the stale-result guards drop whatever still arrives.
+    const running = activeRename.current;
+    if (running?.kind === "preview" && !running.cancelled) void client.cancelScan(running.libraryId, running.scanId).catch(() => {});
+  }, [client]);
+
+  const previewTagRename = useCallback(async (input: RenamePreviewInput): Promise<RenamePreviewResult> => {
+    const libraryId = stateRef.current.activeLibraryId;
+    if (!client.isDesktop || !libraryId || operation.current || scanBusy.current) return { status: "unavailable" };
+    const normalized = normalizeRenameMapping(input.mode, input.source, input.destination);
+    if (!normalized.ok) return { status: "invalid", error: normalized.error };
+    // The one canonical derivation covers the active query and every saved search before each request.
+    const migration = deriveRenameMigration({
+      libraryId, activeFilters: input.activeFilters, savedSearches: stateRef.current.savedSearches ?? [], mapping: normalized.mapping,
+    });
+    if (migration.blockers.length > 0) return { status: "blocked", blockers: migration.blockers };
+
+    operation.current = true;
+    pendingRename.current = null;
+    const generation = scanGeneration.current;
+    const request: ActiveRename = { kind: "preview", libraryId, scanId: crypto.randomUUID(), cancelled: false };
+    activeRename.current = request;
+    const live = () => mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId && activeRename.current === request;
+    setRenamePreviewing(true);
+    setRenameProgress(0);
+    setError(null);
+    const nativeRequest: RenamePreviewRequest = {
+      libraryId, scanId: request.scanId, mode: input.mode, source: input.source, destination: input.destination,
+      normalizedMapping: normalized.mapping,
+      savedSearchReplacements: migration.replacements.map(({ searchId, expectedFilters, filters }) => ({ searchId, expectedFilters, filters })),
+    };
+    try {
+      const outcome = await client.previewTagRename(nativeRequest, (update) => {
+        if (live() && !request.cancelled && update.libraryId === libraryId && update.scanId === request.scanId) setRenameProgress(update.visited);
+      });
+      if (!live()) return { status: "stale" };
+      if (request.cancelled) return { status: "cancelled" };
+      switch (outcome.status) {
+        case "cancelled": return { status: "cancelled" };
+        case "discarded": return { status: "discarded", reason: outcome.reason };
+        case "ready": {
+          validateRenamePreview(outcome.preview, nativeRequest);
+          // Catalog only: no applyState, scan, selection reset or summary write.
+          setAssets(outcome.preview.scan.assets);
+          setIssues(outcome.preview.scan.issues);
+          pendingRename.current = {
+            previewId: outcome.preview.previewId, libraryId, mapping: outcome.preview.mapping, targets: outcome.preview.targets, migration,
+          };
+          return { status: "ready", preview: outcome.preview, migration };
+        }
+        default: return renameFailure("Rename preview returned an unknown status.");
+      }
+    } catch (failure) {
+      if (!live()) return { status: "stale" };
+      if (request.cancelled) return { status: "cancelled" };
+      setError(toAppError(failure));
+      return { status: "failed" };
+    } finally {
+      if (activeRename.current === request) activeRename.current = null;
+      operation.current = false;
+      if (mounted.current) setRenamePreviewing(false);
+    }
+  }, [client]);
+
+  const cancelTagRenamePreview = useCallback(async (): Promise<boolean> => {
+    const request = activeRename.current;
+    if (!client.isDesktop || !request || request.kind !== "preview" || request.cancelled) return false;
+    request.cancelled = true;
+    try {
+      return await client.cancelScan(request.libraryId, request.scanId);
+    } catch (failure) {
+      if (mounted.current && stateRef.current.activeLibraryId === request.libraryId) setError(toAppError(failure));
+      return false;
+    }
+  }, [client]);
+
+  const applyTagRename = useCallback(async (previewId: string, activeQuery: ActiveQueryBinding): Promise<RenameApplyHookResult> => {
+    const libraryId = stateRef.current.activeLibraryId;
+    const pending = pendingRename.current;
+    if (!client.isDesktop || !libraryId || operation.current || scanBusy.current || !pending || pending.previewId !== previewId || pending.libraryId !== libraryId) return { status: "unavailable" };
+    // Native consumes the preview on any outcome, so a retry always needs a fresh one.
+    pendingRename.current = null;
+    operation.current = true;
+    const generation = scanGeneration.current;
+    const request: ActiveRename = { kind: "apply", libraryId, scanId: previewId, cancelled: false };
+    activeRename.current = request;
+    const live = () => mounted.current && generation === scanGeneration.current && stateRef.current.activeLibraryId === libraryId;
+    setRenameApplying(true);
+    setError(null);
+    try {
+      const result = await client.applyTagRename(libraryId, previewId);
+      if (!live()) return { status: "stale" };
+      validateRenameApply(result, pending, stateRef.current.savedSearches ?? []);
+      // Everything below runs only for a fully validated result, including partial results that carry an error.
+      if (result.committed.length > 0) {
+        const committed = new Map(result.committed.map((asset) => [asset.id, asset]));
+        setAssets((rows) => rows.map((row) => committed.get(row.id) ?? row));
+      }
+      if (result.savedSearches.length > 0) {
+        const returned = new Map(result.savedSearches.map((search) => [search.id, search]));
+        const updated = { ...stateRef.current, savedSearches: (stateRef.current.savedSearches ?? []).map((search) => returned.get(search.id) ?? search) };
+        stateRef.current = updated;
+        setState(updated);
+      }
+      let queryUpdated = false;
+      const { before, after, changed } = pending.migration.activeQuery;
+      // Compare-and-set: a query the user edited while the rename ran is theirs and is never overwritten.
+      if (result.outcome === "complete" && result.queryMigrated && changed && activeQuery.read() === before) {
+        activeQuery.write(after);
+        queryUpdated = true;
+      }
+      if (result.error) setError(result.error);
+      return { status: "applied", result, queryUpdated };
+    } catch (failure) {
+      if (!live()) return { status: "stale" };
+      setError(toAppError(failure));
+      return { status: "failed" };
+    } finally {
+      if (activeRename.current === request) activeRename.current = null;
+      operation.current = false;
+      if (mounted.current) setRenameApplying(false);
+    }
+  }, [client]);
   const dismissError = useCallback(() => setError(null), []);
 
   return {
@@ -392,6 +642,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     savingSearch, saveSearch, deleteSearch, savingTheme, setTheme, performAction, actionBusy,
     validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, removeMissingEntry, recoveryBusy,
     deleteAssets, deleting, previewAsset,
+    previewTagRename, cancelTagRenamePreview, applyTagRename, renamePreviewing, renameApplying, renameProgress,
     dismissError, isDesktop: client.isDesktop,
   };
 }

@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLibrary } from "./useLibrary";
 import type { LibraryClient } from "./native";
-import type { AppTheme, LibraryState, ScanProgress, ScanResult } from "./types";
+import type { AppTheme, LibraryState, RenameApplyResult, RenamePreviewOutcome, ScanProgress, ScanResult } from "./types";
 
 const registered: LibraryState = {
   libraries: [{ id: "root1", name: "Library", rootPath: "/selected/library", assetCount: 0, lastScanAt: null }],
@@ -31,6 +31,12 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
     removeMissingEntry: vi.fn().mockResolvedValue({ ...scanResult, scanId: "removal", assets: [] }),
     deleteAssets: vi.fn().mockResolvedValue({ completedIds: ["path:a.stl"], error: null }),
     previewAsset: vi.fn().mockResolvedValue({ kind: "text", content: "preview", mimeType: "text/plain", truncated: false, message: null }),
+    previewTagRename: vi.fn().mockResolvedValue({ status: "cancelled" } satisfies RenamePreviewOutcome),
+    applyTagRename: vi.fn().mockResolvedValue({
+      previewId: "preview-1", libraryId: "root1", mapping: { mode: "exact", source: "old", destination: "new" },
+      committed: [], failed: [], unattempted: [], failingSidecar: null, skipped: [], uninspectable: [],
+      savedSearches: [], error: null, outcome: "complete", queryMigrated: true,
+    } satisfies RenameApplyResult),
     ...overrides,
   };
 }
@@ -717,5 +723,532 @@ describe("native library lifecycle", () => {
     unmount();
     await act(async () => pending.resolve(registered));
     expect(api.scan).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Tag rename: serialized preview/apply with committed-state validation (T10)
+// ---------------------------------------------------------------------------------------------------------------------
+type RenameHook = { current: ReturnType<typeof useLibrary> };
+type RenamePreviewValue = Extract<RenamePreviewOutcome, { status: "ready" }>["preview"];
+
+const searchFilters = (query: string) => ({ query, view: "all" as const, matchMode: "all" as const, kind: "all" as const });
+const renameSearches = [
+  { id: "s1", libraryId: "root1", name: "Old things", filters: searchFilters("old") },
+  { id: "s2", libraryId: "root1", name: "Favorites", filters: searchFilters("favorite") },
+  { id: "s3", libraryId: "other", name: "Other library", filters: searchFilters("old") },
+];
+const renameState = { ...registered, savedSearches: renameSearches, theme: "aurora" as const, extension: { source: "future-settings" } };
+const exactMapping = { mode: "exact" as const, source: "old", destination: "new" };
+const renameRow = (name: string, tags: string[], revision: string) => ({
+  ...scanResult.assets[0], id: `path:${name}`, name, relativePath: name, tags, metadataRevision: revision,
+  metadataId: `uuid-${name}`, metadataState: "valid" as const, status: "ready" as const,
+});
+const previewRows = [renameRow("a.stl", ["old"], "rev-a"), renameRow("b.stl", ["old", "x"], "rev-b"), renameRow("c.stl", ["old"], "rev-c"), renameRow("d.stl", ["keep"], "rev-d")];
+const renamedRows = previewRows.slice(0, 3).map((row, index) => ({ ...row, tags: row.tags.map((tag) => tag === "old" ? "new" : tag), metadataRevision: `renamed-${index}` }));
+const targetOf = (row: { id: string; relativePath: string; kind: "file" | "folder" }) => ({ assetId: row.id, relativePath: row.relativePath, kind: row.kind, sidecarOwner: ".", duplicatesCollapsed: 0 });
+const previewTargets = previewRows.slice(0, 3).map(targetOf);
+const migratedSearch = { ...renameSearches[0], filters: searchFilters("new") };
+
+function basePreview(request: { libraryId: string; scanId: string; savedSearchReplacements: unknown[] }): RenamePreviewValue {
+  return {
+    previewId: "preview-1", libraryId: request.libraryId, scanId: request.scanId, mapping: exactMapping,
+    scan: { libraryId: request.libraryId, scanId: request.scanId, assets: previewRows, issues: [], scannedAt: "2026-11-04T00:00:00Z" },
+    targets: previewTargets, fileCount: 3, folderCount: 0, sidecarCount: 1, destinationExists: false, collisions: [],
+    duplicatesCollapsed: 0, skipped: [], uninspectable: [], savedSearchUpdateCount: request.savedSearchReplacements.length, settingsRetry: false,
+  };
+}
+type PreviewRequest = Parameters<LibraryClient["previewTagRename"]>[0];
+function readyPreview(transform?: (preview: RenamePreviewValue, request: PreviewRequest) => RenamePreviewValue) {
+  return vi.fn(async (request: PreviewRequest): Promise<RenamePreviewOutcome> => {
+    const preview = basePreview(request);
+    return { status: "ready", preview: transform ? transform(preview, request) : preview };
+  });
+}
+function applyResult(overrides: Partial<RenameApplyResult> = {}): RenameApplyResult {
+  return {
+    previewId: "preview-1", libraryId: "root1", mapping: exactMapping, committed: renamedRows, failed: [], unattempted: [],
+    failingSidecar: null, skipped: [], uninspectable: [], savedSearches: [migratedSearch], error: null, outcome: "complete", queryMigrated: true,
+    ...overrides,
+  };
+}
+const renameInput = (query = "old") => ({ mode: "exact" as const, source: " Old ", destination: "NEW", activeFilters: searchFilters(query) });
+function queryBinding(initial: string) {
+  const binding = { current: initial, write: vi.fn((next: string) => { binding.current = next; }) };
+  return { read: () => binding.current, write: binding.write, state: binding };
+}
+async function setupRename(overrides: Partial<LibraryClient> = {}) {
+  const api = client({ load: vi.fn().mockResolvedValue(renameState), previewTagRename: readyPreview(), applyTagRename: vi.fn(async () => applyResult()), ...overrides });
+  const hook = renderHook(() => useLibrary(api));
+  await waitFor(() => expect(hook.result.current.assets).toHaveLength(1));
+  return { api, ...hook };
+}
+async function previewNow(result: RenameHook, input = renameInput()) {
+  let outcome!: Awaited<ReturnType<RenameHook["current"]["previewTagRename"]>>;
+  await act(async () => { outcome = await result.current.previewTagRename(input); });
+  return outcome;
+}
+async function applyNow(result: RenameHook, binding: ReturnType<typeof queryBinding>, previewId = "preview-1") {
+  let outcome!: Awaited<ReturnType<RenameHook["current"]["applyTagRename"]>>;
+  await act(async () => { outcome = await result.current.applyTagRename(previewId, binding); });
+  return outcome;
+}
+
+describe("tag rename preview", () => {
+  it("derives saved-search replacements and the active-query rewrite with the T2 helper before every request", async () => {
+    const { api, result } = await setupRename();
+    const outcome = await previewNow(result, renameInput("old -old:x favorite"));
+    expect(api.previewTagRename).toHaveBeenCalledTimes(1);
+    const first = vi.mocked(api.previewTagRename).mock.calls[0]![0];
+    expect(first).toMatchObject({ libraryId: "root1", mode: "exact", source: " Old ", destination: "NEW", normalizedMapping: exactMapping });
+    expect(first.scanId).toEqual(expect.any(String));
+    expect(first.savedSearchReplacements).toEqual([{ searchId: "s1", expectedFilters: searchFilters("old"), filters: searchFilters("new") }]);
+    expect(first.savedSearchReplacements[0]).not.toHaveProperty("name");
+    expect(outcome).toMatchObject({ status: "ready" });
+    if (outcome.status === "ready") expect(outcome.migration.activeQuery).toEqual({ before: "old -old:x favorite", after: "new -old:x favorite", changed: true });
+
+    await previewNow(result, { mode: "exact", source: "favorite", destination: "starred", activeFilters: searchFilters("old") });
+    const second = vi.mocked(api.previewTagRename).mock.calls[1]![0];
+    expect(second.scanId).not.toBe(first.scanId);
+    expect(second.savedSearchReplacements).toEqual([{ searchId: "s2", expectedFilters: searchFilters("favorite"), filters: searchFilters("starred") }]);
+  });
+
+  it("rejects invalid mappings and unrepresentable query migrations without a native request", async () => {
+    const { api, result } = await setupRename();
+    expect(await previewNow(result, { mode: "exact", source: "old", destination: " OLD ", activeFilters: searchFilters("old") })).toEqual({ status: "invalid", error: "unchanged" });
+    const blocked = await previewNow(result, { mode: "exact", source: "old", destination: "new tag", activeFilters: searchFilters("old") });
+    expect(blocked.status).toBe("blocked");
+    if (blocked.status === "blocked") {
+      expect(blocked.blockers.map((blocker) => blocker.source.kind)).toEqual(["active", "saved"]);
+      expect(blocked.blockers[0]).toMatchObject({ reason: "whitespace", token: "old", destination: "new tag" });
+    }
+    expect(api.previewTagRename).not.toHaveBeenCalled();
+    expect(result.current.renamePreviewing).toBe(false);
+  });
+
+  it("publishes the preview catalog without resetting session state or scanning", async () => {
+    const { api, result } = await setupRename();
+    const before = { state: result.current.state, library: result.current.library, saved: result.current.savedSearches };
+    const savedBefore = structuredClone(before.saved);
+    const outcome = await previewNow(result);
+    expect(outcome.status).toBe("ready");
+    expect(result.current.assets).toEqual(previewRows);
+    expect(result.current.state).toBe(before.state);
+    expect(result.current.library).toBe(before.library);
+    expect(result.current.savedSearches).toEqual(savedBefore);
+    expect(result.current.scanning).toBe(false);
+    expect(result.current.scanStopped).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.renamePreviewing).toBe(false);
+    expect(api.scan).toHaveBeenCalledTimes(1);
+    expect(api.cancelScan).not.toHaveBeenCalled();
+    expect(api.load).toHaveBeenCalledTimes(1);
+    expect(api.editTags).not.toHaveBeenCalled();
+  });
+
+  it("reports progress only for the active request", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    let report!: (progress: ScanProgress) => void;
+    const previewTagRename = vi.fn((_request: PreviewRequest, onProgress: (progress: ScanProgress) => void) => { report = onProgress; return pending.promise; });
+    const { result } = await setupRename({ previewTagRename });
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    expect(result.current.renamePreviewing).toBe(true);
+    expect(result.current.renameProgress).toBe(0);
+    const scanId = previewTagRename.mock.calls[0]![0].scanId;
+    act(() => report({ libraryId: "root1", scanId, visited: 7 }));
+    expect(result.current.renameProgress).toBe(7);
+    act(() => report({ libraryId: "root1", scanId: "someone-else", visited: 99 }));
+    act(() => report({ libraryId: "other", scanId, visited: 98 }));
+    expect(result.current.renameProgress).toBe(7);
+    await act(async () => { pending.resolve({ status: "discarded", reason: "mutation" }); await preview; });
+    expect(result.current.renamePreviewing).toBe(false);
+  });
+
+  it("refuses a second preview, an apply or another native mutation while a preview is in flight", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    const previewTagRename = vi.fn(() => pending.promise);
+    const { api, result } = await setupRename({ previewTagRename });
+    let first!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { first = result.current.previewTagRename(renameInput()); });
+    expect(await result.current.previewTagRename(renameInput())).toEqual({ status: "unavailable" });
+    expect(await result.current.applyTagRename("preview-1", queryBinding("old"))).toEqual({ status: "unavailable" });
+    await act(async () => { expect(await result.current.editTags(result.current.assets[0]!, ["x"], [])).toBe(false); });
+    await act(async () => { await result.current.rescan(); });
+    expect(previewTagRename).toHaveBeenCalledTimes(1);
+    expect(api.applyTagRename).not.toHaveBeenCalled();
+    expect(api.editTags).not.toHaveBeenCalled();
+    expect(api.scan).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve({ status: "cancelled" }); await first; });
+    expect(await previewNow(result)).toMatchObject({ status: "cancelled" });
+    expect(previewTagRename).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns discarded and cancelled native outcomes without touching the catalog", async () => {
+    const previewTagRename = vi.fn<LibraryClient["previewTagRename"]>()
+      .mockResolvedValueOnce({ status: "discarded", reason: "sidecar-changed" })
+      .mockResolvedValueOnce({ status: "cancelled" });
+    const { result } = await setupRename({ previewTagRename });
+    const rows = result.current.assets;
+    expect(await previewNow(result)).toEqual({ status: "discarded", reason: "sidecar-changed" });
+    expect(await previewNow(result)).toEqual({ status: "cancelled" });
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("surfaces a native preview rejection and releases the lock", async () => {
+    const previewTagRename = vi.fn<LibraryClient["previewTagRename"]>().mockRejectedValueOnce({ message: "Library root moved", path: null, details: null });
+    const { result } = await setupRename({ previewTagRename });
+    const rows = result.current.assets;
+    expect(await previewNow(result)).toEqual({ status: "failed" });
+    expect(result.current.error?.message).toBe("Library root moved");
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.renamePreviewing).toBe(false);
+    previewTagRename.mockResolvedValueOnce({ status: "cancelled" });
+    expect(await previewNow(result)).toEqual({ status: "cancelled" });
+  });
+
+  it.each<[string, (preview: RenamePreviewValue) => RenamePreviewValue]>([
+    ["another library", (preview) => ({ ...preview, libraryId: "other" })],
+    ["another scan id", (preview) => ({ ...preview, scanId: "not-requested" })],
+    ["a catalog scanned for another library", (preview) => ({ ...preview, scan: { ...preview.scan, libraryId: "other" } })],
+    ["a catalog with another scan id", (preview) => ({ ...preview, scan: { ...preview.scan, scanId: "not-requested" } })],
+    ["a different normalized mapping", (preview) => ({ ...preview, mapping: { ...exactMapping, destination: "else" } })],
+    ["a target that is not in the catalog", (preview) => ({ ...preview, targets: [...preview.targets, targetOf({ id: "path:ghost.stl", relativePath: "ghost.stl", kind: "file" })] })],
+    ["a target with another path", (preview) => ({ ...preview, targets: [{ ...preview.targets[0]!, relativePath: "z.stl" }, ...preview.targets.slice(1)] })],
+    ["a duplicate target", (preview) => ({ ...preview, targets: [...preview.targets, preview.targets[0]!] })],
+    ["a catalog with duplicate row ids", (preview) => ({ ...preview, scan: { ...preview.scan, assets: [...preview.scan.assets, preview.scan.assets[0]!] } })],
+    ["a wrong saved-search update count", (preview) => ({ ...preview, savedSearchUpdateCount: 5 })],
+    ["an empty preview id", (preview) => ({ ...preview, previewId: "" })],
+  ])("rejects a malformed preview with %s without touching state", async (_label, transform) => {
+    const { result } = await setupRename({ previewTagRename: readyPreview(transform) });
+    const rows = result.current.assets;
+    const state = result.current.state;
+    expect(await previewNow(result)).toEqual({ status: "failed" });
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.state).toBe(state);
+    expect(result.current.error).not.toBeNull();
+    expect(await result.current.applyTagRename("preview-1", queryBinding("old"))).toEqual({ status: "unavailable" });
+  });
+
+  it("rejects an unknown native outcome status", async () => {
+    const { result } = await setupRename({ previewTagRename: vi.fn(async () => ({ status: "weird" }) as unknown as RenamePreviewOutcome) });
+    expect(await previewNow(result)).toEqual({ status: "failed" });
+    expect(result.current.error).not.toBeNull();
+  });
+
+  it("ignores a response that arrives after the library state was replaced (stale library)", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    const old = client({ load: vi.fn().mockResolvedValue(renameState), previewTagRename: vi.fn(() => pending.promise) });
+    const second: LibraryState = { libraries: [{ id: "root2", name: "Second", rootPath: "/second", assetCount: 0, lastScanAt: null }], activeLibraryId: "root2" };
+    const next = client({ load: vi.fn().mockResolvedValue(second) });
+    const { result, rerender } = renderHook(({ api }) => useLibrary(api), { initialProps: { api: old } });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    rerender({ api: next });
+    await waitFor(() => expect(result.current.state.activeLibraryId).toBe("root2"));
+    await waitFor(() => expect(result.current.assets[0]?.id).toBe("path:a.stl"));
+    const rows = result.current.assets;
+    await act(async () => {
+      pending.resolve({ status: "ready", preview: basePreview({ libraryId: "root1", scanId: vi.mocked(old.previewTagRename).mock.calls[0]![0].scanId, savedSearchReplacements: [{}] }) });
+      expect(await preview).toEqual({ status: "stale" });
+    });
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.state.activeLibraryId).toBe("root2");
+    expect(result.current.error).toBeNull();
+  });
+
+  it("ignores a response from a superseded generation even for the same library (stale generation)", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    const old = client({ load: vi.fn().mockResolvedValue(renameState), previewTagRename: vi.fn(() => pending.promise) });
+    const next = client({ load: vi.fn().mockResolvedValue(renameState) });
+    const { result, rerender } = renderHook(({ api }) => useLibrary(api), { initialProps: { api: old } });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    rerender({ api: next });
+    await waitFor(() => expect(next.scan).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    const rows = result.current.assets;
+    await act(async () => {
+      pending.resolve({ status: "ready", preview: basePreview({ libraryId: "root1", scanId: vi.mocked(old.previewTagRename).mock.calls[0]![0].scanId, savedSearchReplacements: [{}] }) });
+      expect(await preview).toEqual({ status: "stale" });
+    });
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not update state after unmount and cancels the native preview best effort", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    const previewTagRename = vi.fn((_request: PreviewRequest) => pending.promise);
+    const { api, result, unmount } = await setupRename({ previewTagRename });
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    const scanId = previewTagRename.mock.calls[0]![0].scanId;
+    unmount();
+    expect(api.cancelScan).toHaveBeenCalledWith("root1", scanId);
+    await act(async () => {
+      pending.resolve({ status: "ready", preview: basePreview({ libraryId: "root1", scanId, savedSearchReplacements: [{}] }) });
+      expect(await preview).toEqual({ status: "stale" });
+    });
+  });
+});
+
+describe("tag rename preview cancellation", () => {
+  it("cancels through the existing registry and discards a result that still arrives", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    let report!: (progress: ScanProgress) => void;
+    const previewTagRename = vi.fn((_request: PreviewRequest, onProgress: (progress: ScanProgress) => void) => { report = onProgress; return pending.promise; });
+    const { api, result } = await setupRename({ previewTagRename });
+    const rows = result.current.assets;
+    expect(await result.current.cancelTagRenamePreview()).toBe(false);
+    expect(api.cancelScan).not.toHaveBeenCalled();
+
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    const scanId = previewTagRename.mock.calls[0]![0].scanId;
+    await act(async () => { expect(await result.current.cancelTagRenamePreview()).toBe(true); });
+    expect(api.cancelScan).toHaveBeenCalledWith("root1", scanId);
+    expect(await result.current.cancelTagRenamePreview()).toBe(false);
+    expect(api.cancelScan).toHaveBeenCalledTimes(1);
+    act(() => report({ libraryId: "root1", scanId, visited: 12 }));
+    expect(result.current.renameProgress).toBe(0);
+    // The native task is still winding down, so the single-flight lock is held until it settles.
+    expect(await result.current.previewTagRename(renameInput())).toEqual({ status: "unavailable" });
+
+    await act(async () => {
+      pending.resolve({ status: "ready", preview: basePreview({ libraryId: "root1", scanId, savedSearchReplacements: [{}] }) });
+      expect(await preview).toEqual({ status: "cancelled" });
+    });
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.renamePreviewing).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(await result.current.applyTagRename("preview-1", queryBinding("old"))).toEqual({ status: "unavailable" });
+  });
+
+  it("treats a native rejection after cancellation as a quiet cancel", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    const { result } = await setupRename({ previewTagRename: vi.fn(() => pending.promise) });
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    await act(async () => { await result.current.cancelTagRenamePreview(); });
+    await act(async () => { pending.reject({ message: "Preview cancelled", path: null, details: null }); expect(await preview).toEqual({ status: "cancelled" }); });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("reports a failed cancel request", async () => {
+    const pending = deferred<RenamePreviewOutcome>();
+    const { api, result } = await setupRename({ previewTagRename: vi.fn(() => pending.promise), cancelScan: vi.fn().mockRejectedValue({ message: "cancel failed", path: null, details: null }) });
+    let preview!: ReturnType<RenameHook["current"]["previewTagRename"]>;
+    act(() => { preview = result.current.previewTagRename(renameInput()); });
+    await act(async () => { expect(await result.current.cancelTagRenamePreview()).toBe(false); });
+    expect(api.cancelScan).toHaveBeenCalledTimes(1);
+    expect(result.current.error?.message).toBe("cancel failed");
+    await act(async () => { pending.resolve({ status: "cancelled" }); await preview; });
+  });
+});
+
+describe("tag rename apply", () => {
+  it("applies a complete result by identity without a scan, applyState or optimistic tags", async () => {
+    const { api, result } = await setupRename();
+    await previewNow(result, renameInput("old -favorite"));
+    const summary = result.current.library;
+    const binding = queryBinding("old -favorite");
+    const optimisticBefore = vi.mocked(api.editTags).mock.calls.length;
+    const outcome = await applyNow(result, binding);
+    expect(api.applyTagRename).toHaveBeenCalledOnce();
+    expect(api.applyTagRename).toHaveBeenCalledWith("root1", "preview-1");
+    expect(outcome).toMatchObject({ status: "applied", queryUpdated: true, result: { outcome: "complete" } });
+    expect(result.current.assets.map((row) => [row.id, row.tags, row.metadataRevision])).toEqual([
+      ["path:a.stl", ["new"], "renamed-0"], ["path:b.stl", ["new", "x"], "renamed-1"], ["path:c.stl", ["new"], "renamed-2"], ["path:d.stl", ["keep"], "rev-d"],
+    ]);
+    expect(binding.write).toHaveBeenCalledExactlyOnceWith("new -favorite");
+    expect(result.current.savedSearches).toEqual([migratedSearch, renameSearches[1]]);
+    expect(result.current.state.savedSearches).toEqual([migratedSearch, renameSearches[1], renameSearches[2]]);
+    expect(result.current.state).toMatchObject({ theme: "aurora", extension: { source: "future-settings" }, activeLibraryId: "root1" });
+    expect(result.current.library).toBe(summary);
+    expect(result.current.renameApplying).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(api.scan).toHaveBeenCalledTimes(1);
+    expect(api.load).toHaveBeenCalledTimes(1);
+    expect(api.cancelScan).not.toHaveBeenCalled();
+    expect(api.editTags).toHaveBeenCalledTimes(optimisticBefore);
+    expect(api.bulkEditTags).not.toHaveBeenCalled();
+    // The preview is consumed: retrying needs a fresh preview.
+    expect(await result.current.applyTagRename("preview-1", queryBinding("old"))).toEqual({ status: "unavailable" });
+    expect(api.applyTagRename).toHaveBeenCalledOnce();
+  });
+
+  it("rewrites the active query only if it still equals the value captured at preview time", async () => {
+    const unchanged = await setupRename();
+    await previewNow(unchanged.result, renameInput("old plain"));
+    const same = queryBinding("old plain");
+    expect(await applyNow(unchanged.result, same)).toMatchObject({ status: "applied", queryUpdated: true });
+    expect(same.write).toHaveBeenCalledExactlyOnceWith("new plain");
+    cleanup();
+
+    const changed = await setupRename();
+    await previewNow(changed.result, renameInput("old plain"));
+    // The user kept typing while the apply was in flight.
+    const live = queryBinding("old plain");
+    vi.mocked(changed.api.applyTagRename).mockImplementationOnce(async () => { live.state.current = "old plain extra"; return applyResult(); });
+    const outcome = await applyNow(changed.result, live);
+    expect(outcome).toMatchObject({ status: "applied", queryUpdated: false, result: { outcome: "complete" } });
+    expect(live.write).not.toHaveBeenCalled();
+    expect(live.state.current).toBe("old plain extra");
+    expect(changed.result.current.savedSearches[0]).toEqual(migratedSearch);
+  });
+
+  it("does not call write when the query needs no rewrite", async () => {
+    const { result } = await setupRename();
+    await previewNow(result, renameInput("favorite"));
+    const binding = queryBinding("favorite");
+    expect(await applyNow(result, binding)).toMatchObject({ status: "applied", queryUpdated: false });
+    expect(binding.write).not.toHaveBeenCalled();
+  });
+
+  it("applies valid committed rows from a partial result that carries an error and leaves searches and query alone", async () => {
+    const partial = applyResult({
+      committed: [renamedRows[0]!], failed: [previewTargets[1]!], unattempted: [previewTargets[2]!], failingSidecar: ".",
+      savedSearches: [renameSearches[0]!], error: { message: "disk full", path: "b.stl", details: null }, outcome: "partial", queryMigrated: false,
+    });
+    const { api, result } = await setupRename({ applyTagRename: vi.fn(async () => partial) });
+    await previewNow(result);
+    const binding = queryBinding("old");
+    const outcome = await applyNow(result, binding);
+    expect(outcome).toMatchObject({ status: "applied", queryUpdated: false, result: { outcome: "partial" } });
+    expect(result.current.assets.map((row) => [row.id, row.tags, row.metadataRevision])).toEqual([
+      ["path:a.stl", ["new"], "renamed-0"], ["path:b.stl", ["old", "x"], "rev-b"], ["path:c.stl", ["old"], "rev-c"], ["path:d.stl", ["keep"], "rev-d"],
+    ]);
+    expect(result.current.error).toEqual({ message: "disk full", path: "b.stl", details: null });
+    expect(binding.write).not.toHaveBeenCalled();
+    expect(result.current.state.savedSearches).toEqual(renameSearches);
+    expect(api.scan).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps committed rows, other settings and the current summary when settings persistence failed", async () => {
+    const failed = applyResult({
+      savedSearches: [renameSearches[0]!], error: { message: "settings write failed", path: null, details: null }, outcome: "settings-failed", queryMigrated: false,
+    });
+    const { result } = await setupRename({ applyTagRename: vi.fn(async () => failed) });
+    await previewNow(result);
+    const summary = result.current.library;
+    const binding = queryBinding("old");
+    expect(await applyNow(result, binding)).toMatchObject({ status: "applied", queryUpdated: false, result: { outcome: "settings-failed" } });
+    expect(result.current.assets.slice(0, 3).map((row) => row.tags)).toEqual([["new"], ["new", "x"], ["new"]]);
+    expect(result.current.state).toMatchObject({ theme: "aurora", extension: { source: "future-settings" }, savedSearches: renameSearches });
+    expect(result.current.library).toBe(summary);
+    expect(result.current.error?.message).toBe("settings write failed");
+    expect(binding.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects a complete result that carries an error and does not rewrite the query", async () => {
+    const inconsistent = applyResult({ error: { message: "late failure", path: null, details: null } });
+    const { result } = await setupRename({ applyTagRename: vi.fn(async () => inconsistent) });
+    await previewNow(result);
+    const binding = queryBinding("old");
+    expect(await applyNow(result, binding)).toEqual({ status: "failed" });
+    expect(binding.write).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, Partial<RenameApplyResult>]>([
+    ["another preview id", { previewId: "preview-2" }],
+    ["another library", { libraryId: "other" }],
+    ["another mapping", { mapping: { ...exactMapping, destination: "else" } }],
+    ["an unknown committed row", { committed: [...renamedRows.slice(0, 2), { ...renamedRows[2]!, id: "path:ghost.stl", relativePath: "ghost.stl" }] }],
+    ["a committed row with another path", { committed: [...renamedRows.slice(0, 2), { ...renamedRows[2]!, relativePath: "z/c.stl" }] }],
+    ["a committed row outside the target set", { committed: [...renamedRows, renameRow("d.stl", ["new"], "x")] }],
+    ["duplicate committed rows", { committed: [renamedRows[0]!, renamedRows[0]!, renamedRows[2]!] }],
+    ["overlapping committed and failed partitions", { committed: renamedRows, failed: [previewTargets[0]!], outcome: "partial", queryMigrated: false }],
+    ["overlapping failed and unattempted partitions", { committed: [renamedRows[0]!], failed: [previewTargets[1]!, previewTargets[2]!], unattempted: [previewTargets[2]!], outcome: "partial", queryMigrated: false, error: { message: "x", path: null, details: null } }],
+    ["a non-exhaustive partition", { committed: renamedRows.slice(0, 2), outcome: "partial", queryMigrated: false, error: { message: "x", path: null, details: null } }],
+    ["an unknown failed row", { committed: renamedRows.slice(0, 2), failed: [{ ...previewTargets[2]!, assetId: "path:ghost.stl", relativePath: "ghost.stl" }], outcome: "partial", queryMigrated: false, error: { message: "x", path: null, details: null } }],
+    ["a failed row with another path", { committed: renamedRows.slice(0, 2), failed: [{ ...previewTargets[2]!, relativePath: "z/c.stl" }], outcome: "partial", queryMigrated: false, error: { message: "x", path: null, details: null } }],
+    ["an unattempted row with another kind", { committed: renamedRows.slice(0, 2), unattempted: [{ ...previewTargets[2]!, kind: "folder" }], outcome: "partial", queryMigrated: false, error: { message: "x", path: null, details: null } }],
+    ["a saved search from another library", { savedSearches: [renameSearches[2]!] }],
+    ["an unknown saved search", { savedSearches: [{ ...migratedSearch, id: "s-unknown" }] }],
+    ["a duplicate saved search", { savedSearches: [migratedSearch, migratedSearch] }],
+    ["a complete outcome with a failed row", { committed: renamedRows.slice(0, 2), failed: [previewTargets[2]!] }],
+    ["a partial outcome with nothing left unapplied", { outcome: "partial", queryMigrated: false, error: { message: "x", path: null, details: null } }],
+    ["a migrated query after a partial outcome", { committed: [renamedRows[0]!], failed: [previewTargets[1]!, previewTargets[2]!], outcome: "partial", queryMigrated: true, error: { message: "x", path: null, details: null } }],
+    ["a settings failure without an error", { outcome: "settings-failed", queryMigrated: false }],
+    ["an unknown outcome", { outcome: "mystery" as RenameApplyResult["outcome"] }],
+  ])("rejects a malformed apply result with %s before touching state", async (_label, overrides) => {
+    const { api, result } = await setupRename({ applyTagRename: vi.fn(async () => applyResult(overrides)) });
+    await previewNow(result);
+    const rows = result.current.assets;
+    const state = result.current.state;
+    const binding = queryBinding("old");
+    expect(await applyNow(result, binding)).toEqual({ status: "failed" });
+    expect(result.current.assets).toBe(rows);
+    expect(result.current.state).toBe(state);
+    expect(binding.write).not.toHaveBeenCalled();
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.renameApplying).toBe(false);
+    expect(api.scan).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses apply without a matching preview and never calls native", async () => {
+    const { api, result } = await setupRename();
+    const binding = queryBinding("old");
+    expect(await applyNow(result, binding)).toEqual({ status: "unavailable" });
+    await previewNow(result);
+    expect(await applyNow(result, binding, "preview-other")).toEqual({ status: "unavailable" });
+    expect(api.applyTagRename).not.toHaveBeenCalled();
+  });
+
+  it("a new preview supersedes the pending one", async () => {
+    const previewTagRename = vi.fn(async (request: PreviewRequest): Promise<RenamePreviewOutcome> => ({
+      status: "ready", preview: { ...basePreview(request), previewId: `preview-${previewTagRename.mock.calls.length}` },
+    }));
+    const { api, result } = await setupRename({ previewTagRename });
+    await previewNow(result);
+    await previewNow(result);
+    expect(await applyNow(result, queryBinding("old"), "preview-1")).toEqual({ status: "unavailable" });
+    expect(api.applyTagRename).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second apply or other mutations while an apply is in flight", async () => {
+    const pending = deferred<RenameApplyResult>();
+    const applyTagRename = vi.fn(() => pending.promise);
+    const { api, result } = await setupRename({ applyTagRename });
+    await previewNow(result);
+    let first!: ReturnType<RenameHook["current"]["applyTagRename"]>;
+    const binding = queryBinding("old");
+    act(() => { first = result.current.applyTagRename("preview-1", binding); });
+    expect(result.current.renameApplying).toBe(true);
+    expect(await result.current.applyTagRename("preview-1", binding)).toEqual({ status: "unavailable" });
+    expect(await result.current.previewTagRename(renameInput())).toEqual({ status: "unavailable" });
+    await act(async () => { expect(await result.current.editTags(result.current.assets[0]!, ["x"], [])).toBe(false); });
+    expect(applyTagRename).toHaveBeenCalledTimes(1);
+    expect(api.previewTagRename).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve(applyResult()); expect(await first).toMatchObject({ status: "applied" }); });
+    expect(result.current.renameApplying).toBe(false);
+  });
+
+  it("surfaces a native apply rejection with no row changes and consumes the preview", async () => {
+    const { result } = await setupRename({ applyTagRename: vi.fn().mockRejectedValue({ message: "Preview is stale", path: null, details: null }) });
+    await previewNow(result);
+    const rows = result.current.assets;
+    const binding = queryBinding("old");
+    expect(await applyNow(result, binding)).toEqual({ status: "failed" });
+    expect(result.current.error?.message).toBe("Preview is stale");
+    expect(result.current.assets).toBe(rows);
+    expect(binding.write).not.toHaveBeenCalled();
+    expect(await applyNow(result, binding)).toEqual({ status: "unavailable" });
+  });
+
+  it("does not touch state or the query when the hook unmounts during apply", async () => {
+    const pending = deferred<RenameApplyResult>();
+    const { api, result, unmount } = await setupRename({ applyTagRename: vi.fn(() => pending.promise) });
+    await previewNow(result);
+    const binding = queryBinding("old");
+    let apply!: ReturnType<RenameHook["current"]["applyTagRename"]>;
+    act(() => { apply = result.current.applyTagRename("preview-1", binding); });
+    unmount();
+    await act(async () => { pending.resolve(applyResult()); expect(await apply).toEqual({ status: "stale" }); });
+    expect(binding.write).not.toHaveBeenCalled();
+    expect(api.scan).toHaveBeenCalledTimes(1);
   });
 });
