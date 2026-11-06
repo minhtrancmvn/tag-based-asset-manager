@@ -1,3 +1,25 @@
+# Native removal-dialog Tab-wrap investigation (2026-10-29)
+
+Expected: Cancel, Tab to Remove entry, Tab wraps to Cancel removal (heading close button). Actual prior run: second Tab AX focus still Remove entry. Environment: Darwin 27, existing isolated test app/binary, approved disposable Workshop only. Prior Escape/first Tab verified; no source defect assumed. Reproduction pending three controlled runs. Knowledge-base large-catalog entry does not match this symptom; historical native IPC observer/lifecycle notes suggest checking delivery and observer behavior, not assuming same root cause. Preserve exact settings/library bytes and unrelated dirty tree; no source edits before confirmed defect and upstream impact.
+
+## Native Tab-wrap conclusion
+Controlled forward focus sequence passed three runs: Cancel, Remove entry, Cancel removal, Cancel; Escape restored Remove missing entry trigger. Screenshot confirms heading-close focus ring. Delivery matrix isolates timing: nil/private source with immediate down/up failed 3/3 each; nil/private source with 80 ms down/up interval succeeded 3/3 each. App source/binary unchanged. Exact OS drop stage and historical single event remain untraced; no application defect established, so no RED application regression, app fix or full-suite rerun claimed. Prior suite/build evidence retained, not repeated.
+
+Owned PID 21646 stopped and exact executable absence checked before restoring settings and manifest. SHA-256 baseline matches exact settings, Workshop, Archive, retained sources, binary, and every baseline source/unrelated file. Evidence: `.git/ui-tabwrap-20261029-evidence.json`; raw local evidence under existing isolated directory `ui-tabwrap-20261029/`. Forward native Tab-wrap gap closed on tested host; Shift+Tab and broader Phase 6 remain open. No build/install/worktree/permission/commit/push/production access.
+
+Errors: initial focus assertion counted focused AX ancestors; filtered AXButton. Legacy Escape did not close modal, so next open assertion failed; pointer Cancel reset safely. No-op knowledge-base Edit rejected; proper append then applied. No application changes from these errors.
+
+## Native Tab-wrap evidence and hypotheses
+- Existing CGEvent driver sends immediate down/up with nil source; repeated Tab and Escape did nothing despite frontmost identity and granted existing trust/post/listen checks. AX ancestry also reports focused=true on ScrollArea/WebArea; leaf-control assertion must filter AXButton.
+- Controlled private-source events, flags=[], autorepeat=0, 80 ms down/up interval: Cancel to Remove entry to Cancel removal to Cancel; Escape restored trigger. Same unchanged binary, same open dialog. Supports delivery issue, not app wrap defect.
+- Components: scratch CGEvent sender; macOS/AppKit/WebKit event routing; React dialog handler; AX observer. Smallest failing path is sender plus current focused native dialog; no metadata mutation needed.
+- Hypothesis 1 HIGH: instantaneous inherited-state nil-source events fail delivery; test original versus explicit-state paced sender across three runs and isolate timing/source.
+- Hypothesis 2 MEDIUM: AX observer reports stale focus or ancestor flags; test leaf focus snapshots, actual AXFocusedUIElement and controlled transitions. Ancestor flags confirmed observer noise; controlled distinct button transitions argue against persistent stale leaf state.
+- Hypothesis 3 LOW: app last-button trap fails; test identical dialog last-button key using controlled delivery. First controlled wrap succeeds; require three repeated sequences before acceptance.
+- Initial sequence assertion failed because it included focused AX ancestors; corrected observer only. Legacy Escape failure left dialog open; no submit/source recreation/removal occurred.
+
+---
+
 # Windows export CI observations (2026-10-08)
 
 ## Confirmed fixture diagnosis
