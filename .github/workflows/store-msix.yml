@@ -105,10 +105,12 @@ jobs:
       - name: Record checksums
         run: |
           foreach ($folder in 'msix-upload', 'msix-test') {
-            Get-ChildItem $folder -File | Get-FileHash -Algorithm SHA256 |
-              ForEach-Object { "$($_.Hash.ToLowerInvariant())  $(Split-Path $_.Path -Leaf)" } |
-              Set-Content (Join-Path $folder 'SHA256SUMS.txt') -Encoding utf8NoBOM
-            Get-Content (Join-Path $folder 'SHA256SUMS.txt')
+            $lines = Get-ChildItem $folder -File | Get-FileHash -Algorithm SHA256 |
+              ForEach-Object { "$($_.Hash.ToLowerInvariant())  $(Split-Path $_.Path -Leaf)" }
+            $sums = Join-Path (Get-Location) "$folder/SHA256SUMS.txt"
+            # LF line endings so `shasum -c` and `sha256sum -c` also work on macOS and Linux.
+            [IO.File]::WriteAllText($sums, ($lines -join "`n") + "`n")
+            Get-Content $sums
           }
 
       - name: Preserve Store upload package (unsigned; Microsoft signs it after certification)
