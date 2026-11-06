@@ -22,7 +22,7 @@ Record OS version, architecture, build, test ID, library location, expected/actu
 | M2-03 | Select fixture library | Recursive scan index retains nested files/folders and root `.` for metadata; catalog shows only direct children at each level, excludes root `.` and manifests/junk; double-click folder enters it; breadcrumbs/Up navigate; sidecar tags/notes/UUIDs load; stale child listed missing |
 | M2-04 | Add second folder; switch active library | One active at a time; no old rows/selection/progress leak |
 | M2-05 | Quit/reopen | Registrations and active library retained from app-data; fresh scan starts |
-| M2-06 | Remove registration; cancel then confirm | Cancel changes nothing; confirm unregisters only, all assets/manifests unchanged |
+| M2-06 | Remove registration; Cancel, Escape, then confirm | In-app dialog states that files and folders are not changed and how many of this library's saved searches are deleted. Cancel and Escape change nothing; confirm unregisters the library and deletes only its saved searches; all assets/manifests unchanged |
 | M2-07 | Search `"Articulated Octopus"` | Case-insensitive filename/relative-path text match; unquoted tokens remain required tags |
 | M2-08 | Sort, resize/hide columns, Shift/Ctrl/Command select, keyboard Enter | Dense table works; Name/Tags remain visible; details follow selection |
 | M2-09 | Add/remove external asset then rescan | New listing replaces prior rows; removed selected asset no stale inspector |
@@ -73,7 +73,7 @@ Record OS version, architecture, build, test ID, library location, expected/actu
 | M4-08 | Required tags All versus Any, exclusions and quoted text | Any changes positive tag combination only; NOT/text still required; no required tags allows all |
 | M4-09 | Filter files/folders plus Untagged/Needs attention | Filters combine consistently; root counted as folder |
 | M4-10 | Save named query/view/mode/kind then restart | Same filters load from local app-data; no library metadata changed by saving |
-| M4-11 | Update search explicitly, rename, delete cancellation/confirmation | Update replaces filters; rename preserves stored filters; cancelled deletion keeps search; confirmed deletion changes app settings only |
+| M4-11 | Update search explicitly, rename; Delete… then Keep search, Delete… then Escape, Delete… then Delete search | Update replaces filters; rename preserves stored filters; Delete… only shows an in-app second step; Keep search and Escape keep the search and the dialog; confirmed deletion changes app settings only |
 | M4-12 | Duplicate/empty names, invalid settings filter type, settings write failure | Clear errors, drafts retained, prior registrations/searches preserved |
 | M4-13 | Two libraries with saved searches | Searches scoped per library; remove registration removes its searches only, no assets/sidecars deleted |
 | M4-14 | Save/search changes during tag save | Controls serialized; no hidden race or catalogue-clearing rescan |
@@ -123,7 +123,7 @@ Apple Silicon macOS debug WKWebView acceptance on 2026-10-07 verified prefix gro
 
 ## Tag and prefix-group rename acceptance
 
-Status: **none of these cases has been executed.** The feature has automated coverage only: frontend interface tests in jsdom and Rust domain tests on disposable fixtures. No application launch, WKWebView run, real-library run, Windows 11 run or Intel macOS run has happened. Use a copied library with nested folders and a disposable app-data folder; hash every `.asset-tags.json` and asset before and after each case. Never inject failures against a real library or real settings.
+Status: **Apple Silicon macOS only** (2026-11-06, see [progress log](progress-log.md#macos-native-acceptance-of-v051-and-in-app-confirmations-2026-11-06)). All cases passed there except RENAME-01 and RENAME-03, which are partial because the PC context-menu key opens WebKit's own menu; RENAME-09 passed with a note. Windows 11 and Intel macOS have not been run. Use a copied library with nested folders and a disposable app-data folder; hash every `.asset-tags.json` and asset before and after each case. Never inject failures against a real library or real settings.
 
 | ID | Action | Expected result |
 |---|---|---|
@@ -143,7 +143,7 @@ Status: **none of these cases has been executed.** The feature has automated cov
 | RENAME-14 | With a partial or settings-failed notice open, try to install an update; then resolve it by complete retry, by library switch, and by **Dismiss notice** | Install is blocked with a rename message. The notice clears only through those routes; **Dismiss notice** appears only when a retry preview has nothing left to migrate or the retry is rejected. A partial rename that keeps failing blocks updates until library switch or app restart |
 | RENAME-15 | Read the confirmation step | States there is no undo and no rollback across folders, that only sidecars change, and points to **Export JSON** as a recovery copy; closing discards the preview |
 | RENAME-16 | Keyboard only: Tab through the dialog, press Escape while idle and during a preview, finish a rename | Focus stays inside the dialog; Escape cancels a running preview or closes the idle dialog; focus returns to the originating tag, or to the TAGS header if that tag no longer exists |
-| RENAME-17 | Run the Windows checks workflow on the rename branch | **Pending, not passed.** A `#[cfg(unix)]` placement that would have broken the Windows test compile was fixed, but could not be verified on the development host (the MSVC cross-compile fails for lack of C headers). A real Windows build is still outstanding |
+| RENAME-17 | Run the Windows checks workflow on the rename branch | **Passed.** The Windows checks workflow (Rust tests, Clippy, frontend tests and unsigned NSIS build) was green on PR #13 before merge and on main afterwards. This is CI only, not Windows UI acceptance |
 
 Rename cases for release acceptance must be run on Windows 11, Apple Silicon macOS and Intel macOS separately; one platform's pass does not cover another.
 
@@ -205,4 +205,4 @@ Initial automated folder/bulk Trash attempt was blocked at picker authorization.
 
 ## Automation boundary
 
-Frontend suites cover parser/catalog, UI, fixture consistency, typed invoke bridge and async lifecycle/stale results. Rust tests cover scanner/root/settings plus manifest parsing, mutation/identity preservation and atomic-write failure behavior. Tag rename adds interface tests in jsdom and Rust tests on disposable fixtures; one Rust test reads `src/components/TagRenameDialog.tsx` to pin the native rejection wording the dialog depends on. UI mocks and browser screenshots do not prove native picker or platform permission behavior. Native platform manual matrix still needed before distributing.
+Frontend suites cover parser/catalog, UI, fixture consistency, typed invoke bridge and async lifecycle/stale results. Rust tests cover scanner/root/settings plus manifest parsing, mutation/identity preservation and atomic-write failure behavior. Tag rename adds interface tests in jsdom and Rust tests on disposable fixtures; one Rust test reads `src/components/TagRenameDialog.tsx` to pin the native rejection wording the dialog depends on. jsdom keeps the browser's synchronous `window.confirm`, but in the desktop app the dialog plugin replaces it with an async stub that never asks; `src/nativeDialogs.test.ts` therefore fails if app source calls `window.confirm`, `alert` or `prompt`. UI mocks and browser screenshots do not prove native picker or platform permission behavior. Native platform manual matrix still needed before distributing.
