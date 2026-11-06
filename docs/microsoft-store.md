@@ -17,7 +17,7 @@ How it works:
 
 - `TAG_ASSET_MANAGER_STORE_BUILD=1` at compile time makes `check_for_updates` and `install_update` in `src-tauri/src/app_updates.rs` refuse before contacting GitHub. The Store workflow also refuses to build if `TAURI_UPDATER_PUBLIC_KEY` is set.
 - `src-tauri/store/tauri.store.json` gives the Store build its own Tauri identifier, so its settings never mix with the GitHub copy's.
-- `src-tauri/store/AppxManifest.xml` holds the package identity from Partner Center. The `Publisher` value is confirmed: it derives the publisher ID `ae7ec8a4n9cgc` in the package family name `kaishj91.Tag-basedAssetManager_ae7ec8a4n9cgc`. `DisplayName` (`Tag-based Asset Manager`) and `PublisherDisplayName` (`kaishj91`) still need checking against Partner Center, under Product identity.
+- `src-tauri/store/AppxManifest.xml` holds the package identity from Partner Center. The `Publisher` value is confirmed: it derives the publisher ID `ae7ec8a4n9cgc` in the package family name `kaishj91.Tag-basedAssetManager_ae7ec8a4n9cgc`. `DisplayName` (`Tag-based Asset Manager`) and `PublisherDisplayName` (`Minh Tran`) match Partner Center → Product identity, as confirmed by the account owner on 2026-11-06.
 - The package is a full-trust desktop app (`runFullTrust`). It needs this to read and write library folders the user picks and to move items to the Recycle Bin.
 
 ## Building the packages
@@ -56,7 +56,6 @@ Clean up afterwards: open `certlm.msc` → **Trusted People** → **Certificates
 
 ## Before the first submission
 
-- Confirm `DisplayName` and `PublisherDisplayName` in `AppxManifest.xml` against Partner Center → Product identity, and fix them if they differ.
 - Upload `store-msix-upload` in a new submission. Partner Center validates the identity on upload.
 - Restricted capability `runFullTrust`: Partner Center asks for a reason. Suggested text: "Desktop app that catalogs and tags files in folders the user chooses; it reads those folders, writes tag files next to them, and moves user-selected items to the Recycle Bin."
 - Store listing: description, at least one screenshot, age rating questionnaire, and a privacy policy URL if Partner Center asks for one. The app collects no personal data and, in the Store edition, makes no network requests of its own.

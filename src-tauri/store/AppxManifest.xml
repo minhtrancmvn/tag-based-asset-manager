@@ -12,7 +12,7 @@
     ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Tag-based Asset Manager</DisplayName>
-    <PublisherDisplayName>kaishj91</PublisherDisplayName>
+    <PublisherDisplayName>Minh Tran</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   <Dependencies>
