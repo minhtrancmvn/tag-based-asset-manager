@@ -441,6 +441,7 @@ pub(super) fn reconnect_targets_domain(
         .cloned()
         .collect();
     record_edit_snapshot(&mut inner, &root, &fresh);
+    inner.rename.note_mutation();
     Ok(targets)
 }
 
@@ -582,6 +583,7 @@ pub(super) fn reconnect_with_writer(
         }
     };
     record_edit_snapshot(&mut inner, &root, &result);
+    inner.rename.note_mutation();
     Ok(result)
 }
 
@@ -671,6 +673,7 @@ pub(super) fn remove_missing_with_writer(
         }
     };
     record_edit_snapshot(&mut inner, &root, &result);
+    inner.rename.note_mutation();
     Ok(result)
 }
 

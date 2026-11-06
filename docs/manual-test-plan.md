@@ -2,7 +2,7 @@
 
 ## MVP scope
 
-Use disposable test folders on Windows 11 and macOS (Apple Silicon and Intel). Scope: native approved scan, single/bulk tags, All/Any/NOT and kind filters, saved searches, open/reveal/copy, validation, confirmed same-folder reconnect and JSON export. Also verify Stop cancellation, folders-first sorting, confirmed Trash / Recycle Bin and bounded Details previews. Notes read-only; import, arbitrary moves/rename and permanent delete deferred. Inert model placeholders in `fixtures/sample-library/` are not printable models. Choose a copy explicitly through picker; never mutate canonical repository fixture during manual checks.
+Use disposable test folders on Windows 11 and macOS (Apple Silicon and Intel). Scope: native approved scan, single/bulk tags, tag and prefix-group rename, All/Any/NOT and kind filters, saved searches, open/reveal/copy, validation, confirmed same-folder reconnect and JSON export. Also verify Stop cancellation, folders-first sorting, confirmed Trash / Recycle Bin and bounded Details previews. Notes read-only; import, arbitrary moves/rename and permanent delete deferred. Inert model placeholders in `fixtures/sample-library/` are not printable models. Choose a copy explicitly through picker; never mutate canonical repository fixture during manual checks.
 
 Record OS version, architecture, build, test ID, library location, expected/actual result and technical details. These cases are a plan, not execution evidence; see [progress log](progress-log.md) for checks actually run.
 
@@ -121,6 +121,32 @@ Native debug reconnect UI was exercised on synthetic assets on 2026-10-07: eligi
 
 Apple Silicon macOS debug WKWebView acceptance on 2026-10-07 verified prefix grouping/exact filtering/folder scope, Stop and recovery, bounded native text/PNG previews, single-file Trash Cancel/Confirm, actual OS Trash contents, exact-path restore and metadata recovery. Separate app-data and synthetic assets were used; see [progress log](progress-log.md). Optimized bundled release checks subsequently confirmed/fixed raster image CSP; complete release control matrix passed only with scratch disabled background throttling. Follow-up default-throttling optimized app passed 15-second opaque-window occlusion/reactivation checks3/3, with previews/filtering/Rescan intact. True Hide/minimize, sleep/wake and long-background recovery remain unverified. This does not cover Finder Put Back UI, folder/bulk/partial Trash platform flows, native picker UI or signed/distribution builds. Remaining cases still require native execution on disposable assets; browser mocked-hook smoke does not prove system Trash or native file reads.
 
+## Tag and prefix-group rename acceptance
+
+Status: **none of these cases has been executed.** The feature has automated coverage only: frontend interface tests in jsdom and Rust domain tests on disposable fixtures. No application launch, WKWebView run, real-library run, Windows 11 run or Intel macOS run has happened. Use a copied library with nested folders and a disposable app-data folder; hash every `.asset-tags.json` and asset before and after each case. Never inject failures against a real library or real settings.
+
+| ID | Action | Expected result |
+|---|---|---|
+| RENAME-01 | Right-click a sidebar tag; then focus another tag and press the context-menu key; then Shift+F10 on a third | Menu opens at the tag each time with **Rename tag**; Escape, outside click, wheel or Tab closes it and focus returns to the tag. Plain F10 opens nothing |
+| RENAME-02 | Open the menu on `oole:identity` and on a plain `favorite` tag; click a prefix group header | Colon tag offers **Rename tag** and **Rename prefix group**; plain tag offers only **Rename tag**; header opens the prefix action |
+| RENAME-03 | Press the context-menu key and Shift+F10 in each platform webview | Exactly one menu opens. The app suppresses a duplicate native `contextmenu` for 1 s after a keyboard open; a webview that fires it later or differently is unverified and must be recorded |
+| RENAME-04 | Enter a nested folder, open Rename, choose **Preview**; then repeat and cancel with Escape or **Cancel preview** | Counts cover the whole library, not the folder in view, and list files, folders and sidecar files separately. Cancel changes nothing. No sidecar, UUID or settings byte changes; navigation, sort, selection and layout are unchanged |
+| RENAME-05 | Confirm an exact rename affecting files and folders in several directories | Only tags in owning sidecars change, once each; asset bytes and paths, UUIDs, notes, unknown fields and stale entries are identical. Table, counts and sidebar update with no rescan |
+| RENAME-06 | Prefix rename `status` to `state` with `status:printed:large` and a plain `status` tag present | Suffix kept (`state:printed:large`); plain `status` unchanged |
+| RENAME-07 | Rename onto an existing tag, with a saved search `-status:printed` and the same term in the active query | Dialog discloses the merge and that migrated searches match differently (the excluded term also excludes rows already tagged with the destination); no duplicate tags in any sidecar |
+| RENAME-08 | Include a missing row, a metadata-blocked row and an unreadable manifest | Missing and blocked rows listed with reasons and unchanged; unreadable metadata listed as uninspectable; none silently dropped |
+| RENAME-09 | Type a new name containing a space, a leading quotation mark, or a leading minus while a saved search or the active query uses the old tag | Refused before any preview, with a blocker naming the saved search or "Active query"; nothing is scanned or changed |
+| RENAME-10 | Complete a rename with saved searches in two libraries and a quoted phrase such as `"status:printed"` | Required and excluded tag terms in this library's searches and active query are rewritten; quoted path text, search names and the other library's searches are unchanged |
+| RENAME-11 | Preview, then edit a tag on another row or change a sidecar externally, then Confirm | Rejected with a message to preview again; no sidecar changed |
+| RENAME-12 | Make one directory's sidecar unwritable in the disposable copy and confirm | Partial result lists committed, failed and unattempted rows and the failing sidecar; earlier sidecars stay renamed; saved searches and active query unchanged; notice remains after closing the dialog; **Preview remaining rows** completes after the cause is fixed |
+| RENAME-13 | After sidecars commit, make the disposable settings file unwritable | "Rename saved, search update failed"; rows stay renamed, searches keep the old name; retry updates only the searches. After quitting the app the retry is gone and the searches need hand correction |
+| RENAME-14 | With a partial or settings-failed notice open, try to install an update; then resolve it by complete retry, by library switch, and by **Dismiss notice** | Install is blocked with a rename message. The notice clears only through those routes; **Dismiss notice** appears only when a retry preview has nothing left to migrate or the retry is rejected. A partial rename that keeps failing blocks updates until library switch or app restart |
+| RENAME-15 | Read the confirmation step | States there is no undo and no rollback across folders, that only sidecars change, and points to **Export JSON** as a recovery copy; closing discards the preview |
+| RENAME-16 | Keyboard only: Tab through the dialog, press Escape while idle and during a preview, finish a rename | Focus stays inside the dialog; Escape cancels a running preview or closes the idle dialog; focus returns to the originating tag, or to the TAGS header if that tag no longer exists |
+| RENAME-17 | Run the Windows checks workflow on the rename branch | **Pending, not passed.** A `#[cfg(unix)]` placement that would have broken the Windows test compile was fixed, but could not be verified on the development host (the MSVC cross-compile fails for lack of C headers). A real Windows build is still outstanding |
+
+Rename cases for release acceptance must be run on Windows 11, Apple Silicon macOS and Intel macOS separately; one platform's pass does not cover another.
+
 ## Theme settings acceptance
 
 | ID | Action | Expected result |
@@ -179,4 +205,4 @@ Initial automated folder/bulk Trash attempt was blocked at picker authorization.
 
 ## Automation boundary
 
-Frontend suites cover parser/catalog, UI, fixture consistency, typed invoke bridge and async lifecycle/stale results. Rust tests cover scanner/root/settings plus manifest parsing, mutation/identity preservation and atomic-write failure behavior. UI mocks and browser screenshots do not prove native picker or platform permission behavior. Native platform manual matrix still needed before distributing.
+Frontend suites cover parser/catalog, UI, fixture consistency, typed invoke bridge and async lifecycle/stale results. Rust tests cover scanner/root/settings plus manifest parsing, mutation/identity preservation and atomic-write failure behavior. Tag rename adds interface tests in jsdom and Rust tests on disposable fixtures; one Rust test reads `src/components/TagRenameDialog.tsx` to pin the native rejection wording the dialog depends on. UI mocks and browser screenshots do not prove native picker or platform permission behavior. Native platform manual matrix still needed before distributing.

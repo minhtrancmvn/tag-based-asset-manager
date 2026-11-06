@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { formatSize, matchesAsset, parseQuery, sortAssets, tagGroup } from "./catalog";
+import { formatSize, matchesAsset, parseQuery, sortAssets, tagGroup, tokenizeQuery } from "./catalog";
+import type { CatalogQuery, QueryToken } from "./catalog";
 import { mockAssets } from "./data/mockAssets";
 
 describe("query parsing", () => {
@@ -68,6 +71,111 @@ describe("query parsing", () => {
   });
   it("treats unprefixed plain tokens as required tags", () => {
     expect(parseQuery("Favorite")).toEqual({ requiredTags: ["favorite"], excludedTags: [], text: [] });
+  });
+});
+
+interface QueryFixtureCase {
+  id: string;
+  query: string;
+}
+
+const queryFixture = JSON.parse(readFileSync(resolve(import.meta.dirname, "../fixtures/tag-rename-queries.json"), "utf8")) as { cases: QueryFixtureCase[] };
+
+// Independent of catalog.ts: rebuild a CatalogQuery purely from token roles and text.
+function queryFromTokens(tokens: QueryToken[]): CatalogQuery {
+  const query: CatalogQuery = { requiredTags: [], excludedTags: [], text: [] };
+  for (const token of tokens) {
+    if (token.role === "required") query.requiredTags.push(token.text.trim().toLowerCase());
+    else if (token.role === "excluded") {
+      const tag = token.text.slice(1).trim().toLowerCase();
+      if (tag) query.excludedTags.push(tag);
+    } else if (token.role === "phrase") {
+      const phrase = token.text.slice(1, -1).trim().toLowerCase();
+      if (phrase) query.text.push(phrase);
+    } else query.text.push(token.text.toLowerCase());
+  }
+  return query;
+}
+
+function reconstruct(input: string, tokens: QueryToken[]): { rebuilt: string; gaps: string[] } {
+  let cursor = 0;
+  let rebuilt = "";
+  const gaps: string[] = [];
+  for (const token of tokens) {
+    gaps.push(input.slice(cursor, token.start));
+    rebuilt += input.slice(cursor, token.start) + token.text;
+    cursor = token.end;
+  }
+  gaps.push(input.slice(cursor));
+  rebuilt += input.slice(cursor);
+  return { rebuilt, gaps };
+}
+
+const spanInputs: string[] = [
+  "",
+  "   ",
+  "category:animal style:flexi -status:printed",
+  '"Flexi Dragon" -"Flexi Dragon" tag',
+  "“Flexi Dragon” -“Flexi Dragon” tag",
+  '“Flexi Dragon" "Flexi Dragon” tag',
+  '"a “b” c" d:e',
+  "“a \"b\" c” d:e",
+  "size:3” owner:artist’s -label:6”",
+  '"unclosed phrase',
+  "-",
+  '"',
+  '-"',
+  " \t\n\u00a0\ufeff status:a\u2028-status:b\u3000",
+  "status:a\u0085status:b",
+  ...queryFixture.cases.map((fixtureCase) => fixtureCase.query),
+];
+
+describe("query tokenization", () => {
+  it("reports ordered spans, exact text and roles", () => {
+    const input = '  status:a  -Color:Red "Flexi Dragon"  -"no thanks" ';
+    expect(tokenizeQuery(input)).toEqual([
+      { start: 2, end: 10, text: "status:a", role: "required" },
+      { start: 12, end: 22, text: "-Color:Red", role: "excluded" },
+      { start: 23, end: 37, text: '"Flexi Dragon"', role: "phrase" },
+      { start: 39, end: 51, text: '-"no thanks"', role: "negative-text" },
+    ]);
+  });
+  it("returns no tokens for empty or whitespace-only input", () => {
+    expect(tokenizeQuery("")).toEqual([]);
+    expect(tokenizeQuery(" \t\n\u00a0\ufeff")).toEqual([]);
+  });
+  it("classifies smart-quoted phrases and negative smart-quoted text", () => {
+    expect(tokenizeQuery("“a b” -“c d”").map((token) => token.role)).toEqual(["phrase", "negative-text"]);
+  });
+  it("keeps an unclosed quote as a tag token", () => {
+    expect(tokenizeQuery('status:a "status:b')).toEqual([
+      { start: 0, end: 8, text: "status:a", role: "required" },
+      { start: 9, end: 18, text: '"status:b', role: "required" },
+    ]);
+  });
+  it("treats U+FEFF as a separator but U+0085 as part of a token", () => {
+    expect(tokenizeQuery("a\ufeffb").map((token) => token.text)).toEqual(["a", "b"]);
+    expect(tokenizeQuery("a\u0085b").map((token) => token.text)).toEqual(["a\u0085b"]);
+  });
+  it("covers at least the shared query fixtures", () => {
+    expect(queryFixture.cases.length).toBeGreaterThan(40);
+  });
+  it.each(spanInputs.map((input, index) => [index, JSON.stringify(input), input] as const))("spans reconstruct the input exactly for input %i %s", (_index, _label, input) => {
+    const tokens = tokenizeQuery(input);
+    const { rebuilt, gaps } = reconstruct(input, tokens);
+    expect(rebuilt).toBe(input);
+    for (const gap of gaps) expect(gap).toMatch(/^\s*$/);
+    let previousEnd = 0;
+    for (const token of tokens) {
+      expect(token.start).toBeGreaterThanOrEqual(previousEnd);
+      expect(token.end).toBeGreaterThan(token.start);
+      expect(input.slice(token.start, token.end)).toBe(token.text);
+      expect(token.text).not.toBe("");
+      previousEnd = token.end;
+    }
+  });
+  it.each(spanInputs.map((input, index) => [index, JSON.stringify(input), input] as const))("roles match parseQuery classification for input %i %s", (_index, _label, input) => {
+    expect(queryFromTokens(tokenizeQuery(input))).toEqual(parseQuery(input));
   });
 });
 

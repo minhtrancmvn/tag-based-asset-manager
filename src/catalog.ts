@@ -10,9 +10,40 @@ export function tagGroup(tag: string): string {
   return tag.split(":", 1)[0].toLowerCase();
 }
 
-export function parseQuery(input: string): CatalogQuery {
-  const result: CatalogQuery = { requiredTags: [], excludedTags: [], text: [] };
-  const tokens: string[] = [];
+export type QueryTokenRole = "required" | "excluded" | "phrase" | "negative-text";
+
+/** One whitespace-delimited (or quote-delimited) query token with its exact source span. */
+export interface QueryToken {
+  /** Index of the first character in the input. */
+  start: number;
+  /** Index one past the last character in the input. */
+  end: number;
+  /** Exact input text, `input.slice(start, end)`. */
+  text: string;
+  role: QueryTokenRole;
+}
+
+function classifyToken(token: string): QueryTokenRole {
+  if (/^["“]/.test(token) && /["”]$/.test(token)) return "phrase";
+  // Negative text search is not part of the query language; the token is kept as literal text.
+  if (/^-["“]/.test(token) && /["”]$/.test(token)) return "negative-text";
+  if (token.startsWith("-")) return "excluded";
+  return "required";
+}
+
+/**
+ * Tag value the parser derives from a required or excluded token (without the exclusion sign),
+ * or null for quoted tokens. An excluded token that is only "-" yields an empty string.
+ */
+export function queryTokenTagValue(token: QueryToken): string | null {
+  if (token.role === "required") return token.text.trim().toLowerCase();
+  if (token.role === "excluded") return token.text.slice(1).trim().toLowerCase();
+  return null;
+}
+
+/** Splits a query into ordered tokens with source spans; the gaps between tokens are whitespace only. */
+export function tokenizeQuery(input: string): QueryToken[] {
+  const tokens: QueryToken[] = [];
   const words = /\S+/g;
   const lastQuoteEnd = Math.max(input.lastIndexOf('"'), input.lastIndexOf("”"));
   let word: RegExpExecArray | null;
@@ -53,21 +84,33 @@ export function parseQuery(input: string): CatalogQuery {
       if (close === -1) close = smartClose;
       if (close !== -1) end = close + 1;
     }
-    tokens.push(input.slice(start, end));
+    const text = input.slice(start, end);
+    tokens.push({ start, end, text, role: classifyToken(text) });
     words.lastIndex = end;
   }
-  for (const token of tokens) {
-    if (/^["“]/.test(token) && /["”]$/.test(token)) {
-      const phrase = token.slice(1, -1).trim().toLowerCase();
-      if (phrase) result.text.push(phrase);
-    } else if (/^-["“]/.test(token) && /["”]$/.test(token)) {
-      // Negative text search is not part of the query language.
-      result.text.push(token.toLowerCase());
-    } else if (token.startsWith("-")) {
-      const tag = token.slice(1).trim().toLowerCase();
-      if (tag) result.excludedTags.push(tag);
-    } else {
-      result.requiredTags.push(token.trim().toLowerCase());
+  return tokens;
+}
+
+export function parseQuery(input: string): CatalogQuery {
+  const result: CatalogQuery = { requiredTags: [], excludedTags: [], text: [] };
+  for (const token of tokenizeQuery(input)) {
+    switch (token.role) {
+      case "phrase": {
+        const phrase = token.text.slice(1, -1).trim().toLowerCase();
+        if (phrase) result.text.push(phrase);
+        break;
+      }
+      case "negative-text":
+        result.text.push(token.text.toLowerCase());
+        break;
+      case "excluded": {
+        const tag = queryTokenTagValue(token);
+        if (tag) result.excludedTags.push(tag);
+        break;
+      }
+      case "required":
+        result.requiredTags.push(token.text.trim().toLowerCase());
+        break;
     }
   }
   return result;

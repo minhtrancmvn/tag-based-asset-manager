@@ -217,6 +217,9 @@ fn invalidate_completed_snapshot_targets(
     completed_ids: &[String],
     completed_relatives: &std::collections::HashMap<String, String>,
 ) {
+    // Every caller reaches here after Trash dispatch began, so pending tag-rename previews are
+    // invalidated conservatively, even when a failed run completed nothing.
+    inner.rename.note_mutation();
     let Some(snapshot) = inner.scan_snapshots.get_mut(library_id) else {
         return;
     };
@@ -635,6 +638,65 @@ mod tests {
             fs::read(root.join("gone.txt")).unwrap(),
             b"new different asset"
         );
+    }
+
+    fn bind_tag_rename_preview(state: &BackendState, root: &Path) -> String {
+        use crate::backend::tag_rename::{normalize_mapping, PendingPreview, RenameMode};
+        let mut inner = state.inner.lock().unwrap();
+        let generation = inner.rename.current_generation();
+        let mapping = normalize_mapping(RenameMode::Prefix, "status", "state").unwrap();
+        inner.rename.bind_preview(PendingPreview::new(
+            "library",
+            root.to_path_buf(),
+            mapping,
+            generation,
+        ))
+    }
+
+    fn tag_rename_preview_rejected(state: &BackendState, preview_id: &str) -> bool {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .rename
+            .take_preview("library", preview_id)
+            .is_err()
+    }
+
+    #[test]
+    fn tag_rename_stale_preview_rejected_after_committed_trash() {
+        let (_dir, root, state) = tag_test_library();
+        fs::write(root.join("one.txt"), b"one").unwrap();
+        let targets = targets_for(&state, &root, &["one.txt"]);
+        let preview_id = bind_tag_rename_preview(&state, &root);
+        let result = delete_assets_with_dispatcher(&state, "library", &targets, |path| {
+            fs::remove_file(path).map_err(|error| error.to_string())
+        })
+        .unwrap();
+        assert_eq!(result.completed_ids, vec!["path:one.txt"]);
+        assert!(tag_rename_preview_rejected(&state, &preview_id));
+    }
+
+    #[test]
+    fn tag_rename_stale_preview_rejected_after_partial_trash_dispatch_failure() {
+        let (_dir, root, state) = tag_test_library();
+        fs::write(root.join("one.txt"), b"one").unwrap();
+        fs::write(root.join("two.txt"), b"two").unwrap();
+        let targets = targets_for(&state, &root, &["one.txt", "two.txt"]);
+        let preview_id = bind_tag_rename_preview(&state, &root);
+        let attempts = RefCell::new(0);
+        let result = delete_assets_with_dispatcher(&state, "library", &targets, |path| {
+            *attempts.borrow_mut() += 1;
+            if *attempts.borrow() == 1 {
+                fs::remove_file(path).map_err(|error| error.to_string())
+            } else {
+                Err("trash unavailable".into())
+            }
+        })
+        .unwrap();
+        assert_eq!(result.completed_ids.len(), 1);
+        assert!(result.error.is_some());
+        assert!(tag_rename_preview_rejected(&state, &preview_id));
     }
 
     #[cfg(unix)]

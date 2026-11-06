@@ -320,3 +320,36 @@ PR #4 merged; release source is exact commit `f63186fd9db9502266c98320905dd71645
 Exact-source checks: macOS frontend **248 tests / 15 files**, Rust **88 passed / 1 ignored**, TypeScript/Vite build, Rust fmt and strict Clippy passed. Windows [main CI run 38197210176](https://github.com/minhtrancmvn/tag-based-asset-manager/actions/runs/38197210176) passed on the exact commit: frontend 248, Rust **76 passed / 1 ignored**, build, fmt, strict Clippy and unsigned NSIS packaging. Local arm64 macOS bundle reports identifier `com.tagbasedassetmanager.desktop`, bundle version/short version 0.2.0, minimum OS 10.13; DMG and ZIP integrity checks passed. Windows installer PE header is valid and runner checksum matches; bootstrapper machine is x86, CI output records x64 payload target, which was not independently extracted. Production macOS package and Windows installer were not launched. These results verify packaging and CI, not native package runtime acceptance.
 
 The feature-source isolated macOS theme matrix remains bounded evidence: twenty selections, Aurora restart, minimum 820×600 layout, Right Arrow focus-only, Return commit and Escape dismissal/focus restoration passed. Exact Tab focus destination and Windows native UI remain unverified. Intel hardware, cross-device/cross-OS OneDrive, signing/notarization, startup reliability, partial native Trash failure and stable sign-off remain open. v0.2.0 is unsigned prerelease only; stable release remains NO-GO. 3MF preview/Space shortcut remains proposed backlog, not implemented in v0.2.0. No new source behavior or runtime capability was added by this record.
+
+## Tag and prefix-group rename (2026-11-04)
+
+Implemented on branch `feat/tag-rename` from base `64b5c55`. Nothing is committed, pushed, merged or released, and no release or Store acceptance is claimed. Design and plan were approved by the user, then re-reviewed after one amendment: saved-search query rewriting moved to the TypeScript parser, so native code never parses queries.
+
+### Built
+
+- Native `preview_tag_rename` and `apply_tag_rename` in `src-tauri/src/tag_rename.rs`: fresh cancellable read-only whole-library preview, native-held preview and in-memory settings-retry state, all-target preflight, one atomic write per owning sidecar committed in order, exact committed/failed/unattempted partitions, and bound saved-search replacements persisted only after every eligible sidecar commits.
+- Frontend: `src/tagRename.ts` (mapping normalization, query rewrite, blockers), hook operations in `src/useLibrary.ts`, `src/components/TagRenameDialog.tsx`, and sidebar tag and prefix-group menus in `src/App.tsx` reachable by right-click, the context-menu key and Shift+F10. Unresolved outcome notices block update installation.
+- Shared fixtures `fixtures/tag-rename-mappings.json`, `fixtures/tag-rename-queries.json` and `fixtures/tag-rename-dto.json`.
+
+### Verification
+
+Last full run on the final source:
+
+- `pnpm exec vitest run`: 897 tests passed in 23 files.
+- `pnpm exec tsc --noEmit` and `pnpm build`: exit 0.
+- `cargo test`: 284 passed, 1 ignored.
+- `cargo fmt --check`: exit 0. `cargo clippy --all-targets -- -D warnings`: clean.
+- `git diff --check`: exit 0.
+
+An independent source review found no blocking product defect. It found a `#[cfg(unix)]` attribute placed on a helper instead of the symlink test it guarded, which would have broken the Windows test compile; merge disclosure for migrated searches missing from the dialog; a second rename request reachable by keyboard while the dialog was open; wording of native rejections that the dialog matches by regular expression with no guard; and a brittle command-count assertion. Each was fixed in source. All but the Windows compile fix are covered by passing tests, including a Rust test that reads the dialog source to pin the rejection wording; the Windows fix is unverified (see below).
+
+### Unverified
+
+- All interface evidence is jsdom. No application launch, WKWebView run, real-library run, Windows 11 run or Intel macOS run has happened. The 1 s duplicate-`contextmenu` guard is proven only against synthetic events. See the [rename acceptance cases](manual-test-plan.md#tag-and-prefix-group-rename-acceptance).
+- The `#[cfg(unix)]` fix could not be verified on the development host: `cargo check --all-targets --target x86_64-pc-windows-msvc` fails in the `ring` build script (`assert.h` not found) before this crate compiles. A real Windows build, from the Windows checks workflow, is outstanding.
+
+### Accepted limits
+
+- The settings-retry proof is in memory only. It ends when the app closes, the library is removed or a later rename overwrites it; dismissing the notice does not clear it. No persisted retry exists, and no native command discards the proof.
+- An unresolved partial or settings-failed notice blocks update installation. A partial rename whose rows keep failing blocks updates until the library is switched or the app restarted.
+- No undo and no cross-directory or sidecar-plus-settings rollback. Skipped-row lists cannot be copied as text.

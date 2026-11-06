@@ -19,6 +19,17 @@ use uuid::Uuid;
 mod milestone5;
 pub use milestone5::*;
 
+#[path = "tag_rename.rs"]
+mod tag_rename;
+pub use tag_rename::{
+    __cmd__apply_tag_rename, __cmd__preview_tag_rename, __tauri_command_name_apply_tag_rename,
+    __tauri_command_name_preview_tag_rename, apply_tag_rename, preview_tag_rename,
+};
+
+#[cfg(test)]
+#[path = "update_install_tests.rs"]
+mod update_install_tests;
+
 const SETTINGS_VERSION: u32 = 1;
 const PROGRESS_INTERVAL: usize = 128;
 
@@ -247,6 +258,7 @@ struct Inner {
     startup_issue: Option<AppError>,
     scan_snapshots: HashMap<String, EditSnapshot>,
     scan_cancellations: HashMap<(String, String), Arc<AtomicBool>>,
+    rename: tag_rename::RenameState,
 }
 
 struct EditSnapshot {
@@ -276,6 +288,23 @@ fn record_edit_snapshot(inner: &mut Inner, root: &Path, result: &ScanResult) {
 }
 
 impl BackendState {
+    pub(crate) fn with_update_install_lock<T>(
+        &self,
+        install: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        // All native sidecar/settings writers use this mutex. Keep it through install/restart.
+        let inner = self
+            .inner
+            .try_lock()
+            .map_err(|_| "Finish pending library operations before updating".to_string())?;
+        if !inner.scan_cancellations.is_empty() {
+            return Err("Stop scans and wait for them to finish before updating".into());
+        }
+        let result = install();
+        drop(inner);
+        result
+    }
+
     pub fn load(settings_path: PathBuf) -> Result<Self, String> {
         let mut libraries = Vec::new();
         let mut active_library_id = None;
@@ -350,6 +379,7 @@ impl BackendState {
                 startup_issue,
                 scan_snapshots: HashMap::new(),
                 scan_cancellations: HashMap::new(),
+                rename: tag_rename::RenameState::default(),
             })),
         })
     }
@@ -378,6 +408,8 @@ impl BackendState {
         if let Some(issue) = &inner.startup_issue {
             return Err(issue.clone());
         }
+        // Tag-rename invalidation hook: runs at entry under the guard, so failed or rolled-back mutations also stale previews.
+        inner.rename.note_mutation();
         let previous_libraries = inner.libraries.clone();
         let previous_active = inner.active_library_id.clone();
         let previous_searches = inner.saved_searches.clone();
@@ -597,6 +629,7 @@ pub fn remove_library(
 
 fn remove_library_domain(state: &BackendState, library_id: &str) -> CommandResult<LibraryState> {
     state.mutate(|inner| {
+        inner.rename.note_library_removed(library_id);
         inner.libraries.retain(|library| library.id != library_id);
         inner
             .saved_searches
@@ -764,6 +797,7 @@ fn edit_notes_domain(
         .inner
         .lock()
         .map_err(|_| AppError::from("Library state unavailable"))?;
+    inner.rename.note_mutation();
     let root = approved_edit_root(&inner, library_id)?;
     let prepared = prepare_tag_target(&inner, library_id, &root, asset_id, expected_revision)?;
     let selected_entry = match &prepared.current {
@@ -826,10 +860,11 @@ fn edit_tags_domain(
     add_tags: &[String],
     remove_tags: &[String],
 ) -> CommandResult<Asset> {
-    let inner = state
+    let mut inner = state
         .inner
         .lock()
         .map_err(|_| AppError::from("Library state unavailable"))?;
+    inner.rename.note_mutation();
     let root = approved_edit_root(&inner, library_id)?;
     let prepared = prepare_tag_target(&inner, library_id, &root, asset_id, expected_revision)?;
     let selected_entry = match &prepared.current {
@@ -1165,10 +1200,11 @@ fn bulk_edit_tags_with_writer(
     {
         return Err(AppError::from("Tag cannot be empty"));
     }
-    let inner = state
+    let mut inner = state
         .inner
         .lock()
         .map_err(|_| AppError::from("Library state unavailable"))?;
+    inner.rename.note_mutation();
     let root = approved_edit_root(&inner, library_id)?;
     let mut groups: BTreeMap<PathBuf, PreparedTagGroup> = BTreeMap::new();
     let mut selected_ids = HashSet::new();
@@ -1367,6 +1403,7 @@ pub async fn scan_library(
                     });
                 }
                 record_edit_snapshot(&mut inner, &root, &result);
+                inner.rename.note_mutation();
             }
             Ok(Some(result))
         })();
@@ -2161,6 +2198,10 @@ mod milestone4_tests;
 #[cfg(test)]
 #[path = "milestone5_tests.rs"]
 mod milestone5_tests;
+
+#[cfg(test)]
+#[path = "tag_rename_tests.rs"]
+mod tag_rename_tests;
 
 #[cfg(test)]
 mod tests {

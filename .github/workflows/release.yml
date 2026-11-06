@@ -79,6 +79,7 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       BUNDLES: ${{ matrix.bundles }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -115,6 +116,9 @@ jobs:
 
       - name: Collect macOS packages
         if: runner.os == 'macOS'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           bundle=src-tauri/target/release/bundle
           app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
@@ -137,9 +141,25 @@ jobs:
           ditto -c -k --keepParent "$app" "release/assets/${name}_arm64.app.zip"
           cp "$dmg" "release/assets/${name}_aarch64.dmg"
           hdiutil verify "release/assets/${name}_aarch64.dmg"
+          if [ -n "$TAURI_UPDATER_PUBLIC_KEY" ]; then
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+              echo "::error::TAURI_UPDATER_PUBLIC_KEY is configured but TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is missing"
+              exit 1
+            fi
+            tar_gz="release/assets/${name}_aarch64.app.tar.gz"
+            tar -czf "$tar_gz" -C "$bundle/macos" "$(basename "$app")"
+            pnpm tauri signer sign --app-version "$VERSION" "$tar_gz"
+            if [ ! -f "${tar_gz}.sig" ]; then
+              echo "::error::Missing macOS updater signature ${tar_gz}.sig"
+              exit 1
+            fi
+          fi
 
       - name: Collect Windows installer
         if: runner.os == 'Windows'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           shopt -s nullglob
           installers=(src-tauri/target/release/bundle/nsis/*_"${VERSION}"_x64-setup.exe)
@@ -147,7 +167,19 @@ jobs:
             echo "::error::Expected one ${VERSION} x64 NSIS installer, found ${#installers[@]}"
             exit 1
           fi
-          cp "${installers[0]}" "release/assets/Tag-Based-Asset-Manager_${VERSION}_x64-setup.exe"
+          installer="release/assets/Tag-Based-Asset-Manager_${VERSION}_x64-setup.exe"
+          cp "${installers[0]}" "$installer"
+          if [ -n "$TAURI_UPDATER_PUBLIC_KEY" ]; then
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+              echo "::error::TAURI_UPDATER_PUBLIC_KEY is configured but TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret is missing"
+              exit 1
+            fi
+            pnpm tauri signer sign --app-version "$VERSION" "$installer"
+            if [ ! -f "${installer}.sig" ]; then
+              echo "::error::Missing Windows installer signature ${installer}.sig"
+              exit 1
+            fi
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -170,6 +202,7 @@ jobs:
       PREVIOUS_TAG: ${{ needs.plan.outputs.previous_tag }}
       TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
       GH_TOKEN: ${{ github.token }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -215,28 +248,75 @@ jobs:
           fi
           echo "target=$target" >> "$GITHUB_OUTPUT"
 
+      - name: Verify release packages and signatures
+        run: |
+          mkdir release
+          cp artifacts/*/assets/* release/
+          count=$(find release -maxdepth 1 -type f | wc -l)
+          if [ -n "$TAURI_UPDATER_PUBLIC_KEY" ]; then
+            if [ "$count" -ne 6 ]; then
+              echo "::error::Expected 6 release files with updater enabled (3 packages, 1 updater tarball, 2 signatures), found $count"
+              ls -l release
+              exit 1
+            fi
+            node scripts/update-feed.mjs verify \
+              --version "$VERSION" \
+              --artifacts-dir release \
+              --public-key "$TAURI_UPDATER_PUBLIC_KEY"
+          else
+            if [ "$count" -ne 3 ]; then
+              echo "::error::Expected 3 packages, found $count"
+              ls -l release
+              exit 1
+            fi
+          fi
+          (cd release && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
       - name: Publish prerelease
         env:
           TARGET: ${{ steps.commit.outputs.target }}
         run: |
-          mkdir release
-          cp artifacts/*/assets/* release/
-          if [ "$(find release -type f | wc -l)" -ne 3 ]; then
-            echo "::error::Expected 3 packages"
-            ls -l release
-            exit 1
-          fi
-          (cd release && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          TAG="v$VERSION"
           notes="Automated unsigned prerelease built from \`$TARGET\` after Windows checks passed on \`$TESTED_SHA\`.
 
           macOS packages (Apple Silicon) have no Developer ID signing or notarization, and the Windows x64 installer is unsigned; platform warnings may block installation. Verify downloads against \`SHA256SUMS.txt\`.
 
           [Code signing policy](https://github.com/$GITHUB_REPOSITORY#code-signing-policy) · [MIT License](https://github.com/$GITHUB_REPOSITORY/blob/$TARGET/LICENSE)"
-          gh release create "v$VERSION" release/* \
+          gh release create "$TAG" release/* \
             --target "$TARGET" \
-            --title "v$VERSION — unsigned preview builds" \
+            --title "$TAG — unsigned preview builds" \
             --notes "$notes" \
             --generate-notes \
             --notes-start-tag "$PREVIOUS_TAG" \
             --prerelease \
             --latest=false
+
+      - name: Publish update preview feed
+        if: env.TAURI_UPDATER_PUBLIC_KEY != ''
+        run: |
+          TAG="v$VERSION"
+          body=$(gh release view "$TAG" --json body -q .body)
+          node scripts/update-feed.mjs generate \
+            --version "$VERSION" \
+            --artifacts-dir release \
+            --public-key "$TAURI_UPDATER_PUBLIC_KEY" \
+            --notes "$body" \
+            --repository "$GITHUB_REPOSITORY" \
+            --out latest.json
+
+          feed_dir=$(mktemp -d)
+          git clone --depth 1 --branch update-preview "https://github.com/${GITHUB_REPOSITORY}.git" "$feed_dir" 2>/dev/null || {
+            git clone --depth 1 "https://github.com/${GITHUB_REPOSITORY}.git" "$feed_dir"
+            git -C "$feed_dir" checkout --orphan update-preview
+            git -C "$feed_dir" rm -rf . || true
+          }
+          cp latest.json "$feed_dir/latest.json"
+          git -C "$feed_dir" add latest.json
+          if ! git -C "$feed_dir" diff --cached --quiet; then
+            git -C "$feed_dir" -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit --quiet -m "chore(update): publish $TAG manifest"
+            git -C "$feed_dir" -c credential.helper= \
+                -c credential.helper='!gh auth git-credential' push origin update-preview
+          fi
+          rm -rf "$feed_dir"

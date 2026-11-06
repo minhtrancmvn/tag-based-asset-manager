@@ -1,0 +1,1480 @@
+{
+  "version": 1,
+  "description": "Shared tag-rename mapping cases for Rust (authoritative) and TypeScript. Name normalization: strip leading/trailing Unicode White_Space characters (Rust str::trim; this does NOT strip U+FEFF), then Unicode default lowercase. Exact mode: errors empty-source, empty-destination, unchanged. Prefix mode: normalize, remove exactly one trailing colon (no re-trim), then errors empty-source, empty-destination, multi-segment-prefix (a colon remains), unchanged. Error precedence: source empty is reported before destination empty; cases never combine different error kinds. Tag mapping: normalize each tag; exact renames a tag equal to source; prefix renames tags starting with source+':' keeping the whole remainder (a plain tag equal to source is not renamed). An entry is a target iff any normalized tag maps; targets output normalize_tags (trim, lowercase, drop empties, sort bytewise, dedup); non-targets output the input untouched. duplicatesCollapsed = distinct non-empty normalized input tags minus output tags for targets, else 0. No tag case mixes astral characters with U+E000..U+FFFF, so UTF-8 byte order and UTF-16 order agree. Cases whose lowercase result depends on Unicode context (final sigma, dotted capital I, astral Deseret) must be re-checked against Rust to_lowercase in the Rust test.",
+  "cases": [
+    {
+      "id": "exact-basic",
+      "mode": "exact",
+      "source": "Status",
+      "destination": "State",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "Status",
+            "x"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "status:printed",
+            "status"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "status:printed"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "color:red",
+            "x"
+          ],
+          "target": false,
+          "output": [
+            "color:red",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            " Z ",
+            "a"
+          ],
+          "target": false,
+          "output": [
+            " Z ",
+            "a"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [],
+          "target": false,
+          "output": [],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-trim-and-lowercase",
+      "mode": "exact",
+      "source": "  STATUS \t",
+      "destination": "\n State\u00a0",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\u00a0STATUS ",
+            "Other"
+          ],
+          "target": true,
+          "output": [
+            "other",
+            "state"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-merge-into-existing-destination",
+      "mode": "exact",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status",
+            "state",
+            "x"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "x"
+          ],
+          "duplicatesCollapsed": 1
+        },
+        {
+          "input": [
+            "STATUS",
+            "State",
+            " state "
+          ],
+          "target": true,
+          "output": [
+            "state"
+          ],
+          "duplicatesCollapsed": 1
+        }
+      ]
+    },
+    {
+      "id": "exact-duplicate-inputs-not-counted-as-merge",
+      "mode": "exact",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "Status",
+            "x",
+            "X"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-empty-tags-dropped",
+      "mode": "exact",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status",
+            "  ",
+            "\u3000"
+          ],
+          "target": true,
+          "output": [
+            "state"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-colon-names-not-stripped",
+      "mode": "exact",
+      "source": "status:",
+      "destination": "state:",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status:",
+          "destination": "state:"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:",
+            "status"
+          ],
+          "target": true,
+          "output": [
+            "state:",
+            "status"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-source-trailing-colon-differs-from-plain",
+      "mode": "exact",
+      "source": "status:",
+      "destination": "status",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status:",
+          "destination": "status"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:",
+            "status:x"
+          ],
+          "target": true,
+          "output": [
+            "status",
+            "status:x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-whole-compound-name",
+      "mode": "exact",
+      "source": "Status:Printed",
+      "destination": "State:Done",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status:printed",
+          "destination": "state:done"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:printed",
+            "status:printed:large",
+            "status"
+          ],
+          "target": true,
+          "output": [
+            "state:done",
+            "status",
+            "status:printed:large"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-interior-whitespace-preserved",
+      "mode": "exact",
+      "source": "my status",
+      "destination": "my state",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "my status",
+          "destination": "my state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "My Status",
+            "mystatus"
+          ],
+          "target": true,
+          "output": [
+            "my state",
+            "mystatus"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-edge-whitespace-nbsp",
+      "mode": "exact",
+      "source": "\u00a0Status\u00a0",
+      "destination": "\u00a0State\u00a0",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\u00a0status\u00a0",
+            "z"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "z"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-edge-whitespace-u0085",
+      "mode": "exact",
+      "source": "\u0085Status\u0085",
+      "destination": "\u0085State\u0085",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\u0085status\u0085",
+            "z"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "z"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-edge-whitespace-u2028",
+      "mode": "exact",
+      "source": "\u2028Status\u2028",
+      "destination": "\u2028State\u2028",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\u2028status\u2028",
+            "z"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "z"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-edge-whitespace-u3000",
+      "mode": "exact",
+      "source": "\u3000Status\u3000",
+      "destination": "\u3000State\u3000",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\u3000status\u3000",
+            "z"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "z"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-edge-whitespace-tab-newline",
+      "mode": "exact",
+      "source": "\t\nStatus\t\n",
+      "destination": "\t\nState\t\n",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\t\nstatus\t\n",
+            "z"
+          ],
+          "target": true,
+          "output": [
+            "state",
+            "z"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-feff-preserved",
+      "mode": "exact",
+      "source": "\ufeffstatus",
+      "destination": "state\ufeff",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "\ufeffstatus",
+          "destination": "state\ufeff"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\ufeffstatus",
+            "status"
+          ],
+          "target": true,
+          "output": [
+            "state\ufeff",
+            "status"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "status",
+            "other"
+          ],
+          "target": false,
+          "output": [
+            "status",
+            "other"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-feff-only-name-is-not-empty",
+      "mode": "exact",
+      "source": "\ufeff",
+      "destination": "x",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "\ufeff",
+          "destination": "x"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\ufeff",
+            "a"
+          ],
+          "target": true,
+          "output": [
+            "a",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-feff-differs-from-plain-name",
+      "mode": "exact",
+      "source": "\ufeffa",
+      "destination": "a",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "\ufeffa",
+          "destination": "a"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\ufeffa",
+            "a"
+          ],
+          "target": true,
+          "output": [
+            "a"
+          ],
+          "duplicatesCollapsed": 1
+        }
+      ]
+    },
+    {
+      "id": "exact-feff-blocks-trim-of-inner-whitespace",
+      "mode": "exact",
+      "source": " \ufeff status \ufeff ",
+      "destination": "x",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "\ufeff status \ufeff",
+          "destination": "x"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\ufeff status \ufeff",
+            "status"
+          ],
+          "target": true,
+          "output": [
+            "status",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-astral-names",
+      "mode": "exact",
+      "source": "📦Box",
+      "destination": "🎁Box",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "📦box",
+          "destination": "🎁box"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "📦BOX",
+            "📦"
+          ],
+          "target": true,
+          "output": [
+            "🎁box",
+            "📦"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-astral-lowercase",
+      "mode": "exact",
+      "source": "𐐀X",
+      "destination": "y",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "𐐨x",
+          "destination": "y"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "𐐀x",
+            "𐐨X"
+          ],
+          "target": true,
+          "output": [
+            "y"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-final-sigma",
+      "mode": "exact",
+      "source": "ΟΔΟΣ",
+      "destination": "odos",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "οδος",
+          "destination": "odos"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "ΟΔΟΣ",
+            "οδοσ"
+          ],
+          "target": true,
+          "output": [
+            "odos",
+            "οδοσ"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-lone-sigma",
+      "mode": "exact",
+      "source": "Σ",
+      "destination": "sigma",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "σ",
+          "destination": "sigma"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "Σ",
+            "ς"
+          ],
+          "target": true,
+          "output": [
+            "sigma",
+            "ς"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-dotted-capital-i",
+      "mode": "exact",
+      "source": "İstanbul",
+      "destination": "city",
+      "expected": {
+        "mapping": {
+          "mode": "exact",
+          "source": "i\u0307stanbul",
+          "destination": "city"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "İSTANBUL",
+            "istanbul",
+            "i\u0307stanbul"
+          ],
+          "target": true,
+          "output": [
+            "city",
+            "istanbul"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "exact-error-empty-source",
+      "mode": "exact",
+      "source": "",
+      "destination": "x",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "exact-error-whitespace-only-source",
+      "mode": "exact",
+      "source": "  \u3000\u0085\n\u00a0\u2028",
+      "destination": "x",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "exact-error-empty-destination",
+      "mode": "exact",
+      "source": "x",
+      "destination": "\t \u00a0",
+      "expected": {
+        "error": "empty-destination"
+      }
+    },
+    {
+      "id": "exact-error-both-empty-reports-source",
+      "mode": "exact",
+      "source": " ",
+      "destination": "",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "exact-error-unchanged-case-only",
+      "mode": "exact",
+      "source": "Status",
+      "destination": "status",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "exact-error-unchanged-after-trim",
+      "mode": "exact",
+      "source": " a ",
+      "destination": "a",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "exact-error-unchanged-unicode-whitespace",
+      "mode": "exact",
+      "source": "\u00a0a",
+      "destination": "A\u3000",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "exact-error-unchanged-with-colon",
+      "mode": "exact",
+      "source": "A:B",
+      "destination": "a:b",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "exact-error-unchanged-final-sigma",
+      "mode": "exact",
+      "source": "ΟΔΟΣ",
+      "destination": "οδος",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "prefix-basic",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "Status:Printed",
+            "x"
+          ],
+          "target": true,
+          "output": [
+            "state:printed",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "status",
+            "color:red"
+          ],
+          "target": false,
+          "output": [
+            "status",
+            "color:red"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "status",
+            "status:printed"
+          ],
+          "target": true,
+          "output": [
+            "state:printed",
+            "status"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-trailing-colon-both",
+      "mode": "prefix",
+      "source": "status:",
+      "destination": "state:",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:printed:large"
+          ],
+          "target": true,
+          "output": [
+            "state:printed:large"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-trailing-colon-source-only",
+      "mode": "prefix",
+      "source": "status:",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:a"
+          ],
+          "target": true,
+          "output": [
+            "state:a"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-trailing-colon-destination-only",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state:",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:a"
+          ],
+          "target": true,
+          "output": [
+            "state:a"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-uppercase",
+      "mode": "prefix",
+      "source": "STATUS:",
+      "destination": "State:",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "STATUS:Printed",
+            "Status:"
+          ],
+          "target": true,
+          "output": [
+            "state:",
+            "state:printed"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-trim-then-strip-one-colon",
+      "mode": "prefix",
+      "source": "\u3000Status:\u00a0",
+      "destination": "\tState:\n",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:a"
+          ],
+          "target": true,
+          "output": [
+            "state:a"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-space-before-colon-not-retrimmed",
+      "mode": "prefix",
+      "source": "status :",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status ",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status :x",
+            "status:x"
+          ],
+          "target": true,
+          "output": [
+            "state:x",
+            "status:x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-plain-name-not-renamed",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status"
+          ],
+          "target": false,
+          "output": [
+            "status"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "Status",
+            " x "
+          ],
+          "target": false,
+          "output": [
+            "Status",
+            " x "
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-colon-only-tag",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:"
+          ],
+          "target": true,
+          "output": [
+            "state:"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "status:",
+            "state:"
+          ],
+          "target": true,
+          "output": [
+            "state:"
+          ],
+          "duplicatesCollapsed": 1
+        }
+      ]
+    },
+    {
+      "id": "prefix-nested-colon-suffix",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:printed:large",
+            "Status:a:b:c"
+          ],
+          "target": true,
+          "output": [
+            "state:a:b:c",
+            "state:printed:large"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-merge-into-existing-destination",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:printed",
+            "state:printed",
+            "Status:Printed"
+          ],
+          "target": true,
+          "output": [
+            "state:printed"
+          ],
+          "duplicatesCollapsed": 1
+        },
+        {
+          "input": [
+            "status:a",
+            "state:a",
+            "status:b",
+            "STATE:B"
+          ],
+          "target": true,
+          "output": [
+            "state:a",
+            "state:b"
+          ],
+          "duplicatesCollapsed": 2
+        }
+      ]
+    },
+    {
+      "id": "prefix-partial-names-not-renamed",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "statusx:y",
+            "xstatus:y",
+            "status-x:y"
+          ],
+          "target": false,
+          "output": [
+            "statusx:y",
+            "xstatus:y",
+            "status-x:y"
+          ],
+          "duplicatesCollapsed": 0
+        },
+        {
+          "input": [
+            "statusx:y",
+            "status:y"
+          ],
+          "target": true,
+          "output": [
+            "state:y",
+            "statusx:y"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-edge-whitespace-mixed",
+      "mode": "prefix",
+      "source": "\t\n\u0085\u00a0\u2028\u3000status:\u3000",
+      "destination": "\u2028State:\n",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\u0085Status:Printed\u3000",
+            "z"
+          ],
+          "target": true,
+          "output": [
+            "state:printed",
+            "z"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-feff-preserved",
+      "mode": "prefix",
+      "source": "\ufeffstatus:",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "\ufeffstatus",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\ufeffstatus:a",
+            "status:a"
+          ],
+          "target": true,
+          "output": [
+            "state:a",
+            "status:a"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-feff-tag-not-matched-by-plain-prefix",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "\ufeffstatus:a",
+            "x"
+          ],
+          "target": false,
+          "output": [
+            "\ufeffstatus:a",
+            "x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-astral-names",
+      "mode": "prefix",
+      "source": "📦:",
+      "destination": "🎁",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "📦",
+          "destination": "🎁"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "📦:Large",
+            "📦",
+            "📦:a:b"
+          ],
+          "target": true,
+          "output": [
+            "🎁:a:b",
+            "🎁:large",
+            "📦"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-astral-suffix",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "state",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "status",
+          "destination": "state"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "status:📦",
+            "Status:😀X"
+          ],
+          "target": true,
+          "output": [
+            "state:📦",
+            "state:😀x"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-final-sigma-depends-on-whole-tag-context",
+      "mode": "prefix",
+      "source": "ΟΔΟΣ",
+      "destination": "odos",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "οδος",
+          "destination": "odos"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "ΟΔΟΣ:Α",
+            "οδος:Α"
+          ],
+          "target": true,
+          "output": [
+            "odos:α",
+            "οδοσ:α"
+          ],
+          "duplicatesCollapsed": 0
+        }
+      ]
+    },
+    {
+      "id": "prefix-dotted-capital-i",
+      "mode": "prefix",
+      "source": "İ",
+      "destination": "i",
+      "expected": {
+        "mapping": {
+          "mode": "prefix",
+          "source": "i\u0307",
+          "destination": "i"
+        }
+      },
+      "tags": [
+        {
+          "input": [
+            "İ:Large",
+            "i:large"
+          ],
+          "target": true,
+          "output": [
+            "i:large"
+          ],
+          "duplicatesCollapsed": 1
+        }
+      ]
+    },
+    {
+      "id": "prefix-error-empty-source",
+      "mode": "prefix",
+      "source": "",
+      "destination": "x",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "prefix-error-colon-only-source",
+      "mode": "prefix",
+      "source": ":",
+      "destination": "x",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "prefix-error-padded-colon-only-source",
+      "mode": "prefix",
+      "source": " \u3000: ",
+      "destination": "x",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "prefix-error-empty-destination",
+      "mode": "prefix",
+      "source": "x",
+      "destination": "\t",
+      "expected": {
+        "error": "empty-destination"
+      }
+    },
+    {
+      "id": "prefix-error-colon-only-destination",
+      "mode": "prefix",
+      "source": "x",
+      "destination": ":",
+      "expected": {
+        "error": "empty-destination"
+      }
+    },
+    {
+      "id": "prefix-error-both-empty-reports-source",
+      "mode": "prefix",
+      "source": ":",
+      "destination": ":",
+      "expected": {
+        "error": "empty-source"
+      }
+    },
+    {
+      "id": "prefix-error-multi-segment-source",
+      "mode": "prefix",
+      "source": "a:b",
+      "destination": "c",
+      "expected": {
+        "error": "multi-segment-prefix"
+      }
+    },
+    {
+      "id": "prefix-error-double-colon-source",
+      "mode": "prefix",
+      "source": "::",
+      "destination": "c",
+      "expected": {
+        "error": "multi-segment-prefix"
+      }
+    },
+    {
+      "id": "prefix-error-trailing-double-colon-source",
+      "mode": "prefix",
+      "source": "status::",
+      "destination": "c",
+      "expected": {
+        "error": "multi-segment-prefix"
+      }
+    },
+    {
+      "id": "prefix-error-multi-segment-destination",
+      "mode": "prefix",
+      "source": "a",
+      "destination": "c:d:",
+      "expected": {
+        "error": "multi-segment-prefix"
+      }
+    },
+    {
+      "id": "prefix-error-leading-colon-destination",
+      "mode": "prefix",
+      "source": "a",
+      "destination": ":c",
+      "expected": {
+        "error": "multi-segment-prefix"
+      }
+    },
+    {
+      "id": "prefix-error-unchanged-trailing-colon",
+      "mode": "prefix",
+      "source": "status:",
+      "destination": "status",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "prefix-error-unchanged-case",
+      "mode": "prefix",
+      "source": "status",
+      "destination": "STATUS:",
+      "expected": {
+        "error": "unchanged"
+      }
+    },
+    {
+      "id": "prefix-error-unchanged-unicode-whitespace",
+      "mode": "prefix",
+      "source": "\u00a0a:",
+      "destination": "A\u3000",
+      "expected": {
+        "error": "unchanged"
+      }
+    }
+  ]
+}

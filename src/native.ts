@@ -1,5 +1,9 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppError, AppTheme, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState, PreviewResult, ScanProgress, ScanResult, SearchFilters, TrashResult, ValidationReport } from "./types";
+import type {
+  AppError, AppTheme, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState,
+  PreviewResult, RenameApplyResult, RenamePreviewOutcome, RenamePreviewRequest, ScanProgress, ScanResult,
+  SearchFilters, TrashResult, ValidationReport,
+} from "./types";
 
 export interface LibraryClient {
   isDesktop: boolean;
@@ -23,6 +27,8 @@ export interface LibraryClient {
   getReconnectTargets: (libraryId: string, assetId: string, expectedRevision: string) => Promise<Asset[]>;
   reconnectAsset: (libraryId: string, assetId: string, expectedRevision: string, targetAssetId: string) => Promise<ScanResult>;
   removeMissingEntry: (libraryId: string, assetId: string, expectedRevision: string) => Promise<ScanResult>;
+  previewTagRename: (request: RenamePreviewRequest, onProgress: (progress: ScanProgress) => void) => Promise<RenamePreviewOutcome>;
+  applyTagRename: (libraryId: string, previewId: string) => Promise<RenameApplyResult>;
 }
 
 export function toAppError(value: unknown): AppError {
@@ -62,4 +68,11 @@ export const nativeClient: LibraryClient = {
   cancelScan: (libraryId, scanId) => invoke<boolean>("cancel_scan", { libraryId, scanId }),
   deleteAssets: (libraryId, targets) => invoke<TrashResult>("delete_assets", { libraryId, targets }),
   previewAsset: (libraryId, assetId) => invoke<PreviewResult>("preview_asset", { libraryId, assetId }),
+  previewTagRename: (request, onProgress) => {
+    const channel = new Channel<ScanProgress>();
+    channel.onmessage = onProgress;
+    return invoke<RenamePreviewOutcome>("preview_tag_rename", { request, onProgress: channel });
+  },
+  // Native command arrives in T9/T11 backend tasks; exact IPC name and argument shape:
+  applyTagRename: (libraryId, previewId) => invoke<RenameApplyResult>("apply_tag_rename", { libraryId, previewId }),
 };

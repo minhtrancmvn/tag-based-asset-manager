@@ -2,12 +2,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
+import * as appUpdatesModule from "./appUpdates";
 import { DEVELOPMENT_VERSION, getAppVersion } from "./appVersion";
 import { useLibrary } from "./useLibrary";
-import type { Asset, LibraryState, LibrarySummary, ScanIssue } from "./types";
+import { deriveRenameMigration } from "./tagRename";
+import type { RenameMigration } from "./tagRename";
+import type { Asset, LibraryState, LibrarySummary, RenameApplyResult, RenameMapping, RenamePreview, RenameSkippedRow, RenameTargetSummary, SavedSearch, ScanIssue } from "./types";
 
 vi.mock("./useLibrary", () => ({ useLibrary: vi.fn() }));
 vi.mock("./appVersion", () => ({ DEVELOPMENT_VERSION: "Development build · version unavailable", getAppVersion: vi.fn() }));
+vi.mock("./appUpdates", () => ({
+  checkForUpdates: vi.fn(),
+  installUpdate: vi.fn(),
+}));
 
 afterEach(cleanup);
 
@@ -45,6 +52,9 @@ const actions = {
   removeMissingEntry: vi.fn<(_: Asset) => Promise<boolean>>(),
   deleteAssets: vi.fn<(_: Asset[]) => Promise<boolean>>(),
   previewAsset: vi.fn<(_: Asset) => Promise<import("./types").PreviewResult | null>>(),
+  previewTagRename: vi.fn<(_: import("./useLibrary").RenamePreviewInput) => Promise<import("./useLibrary").RenamePreviewResult>>(),
+  cancelTagRenamePreview: vi.fn<() => Promise<boolean>>(),
+  applyTagRename: vi.fn<(_: string, __: import("./useLibrary").ActiveQueryBinding) => Promise<import("./useLibrary").RenameApplyHookResult>>(),
 };
 
 function setLibraryResult(overrides: Partial<{
@@ -59,6 +69,7 @@ function setLibraryResult(overrides: Partial<{
   error: { message: string; path: string | null; details: string | null } | null;
   isDesktop: boolean;
   editingAssetId: string | null;
+  editingNotesAssetId: string | null;
   bulkEditing: boolean;
   savingSearch: boolean;
   savedSearches: import("./types").SavedSearch[];
@@ -69,6 +80,9 @@ function setLibraryResult(overrides: Partial<{
   theme: import("./themes").AppTheme;
   savingTheme: boolean;
   setTheme: (theme: import("./themes").AppTheme) => Promise<boolean>;
+  renamePreviewing: boolean;
+  renameApplying: boolean;
+  renameProgress: number;
 }> = {}) {
   vi.mocked(useLibrary).mockReturnValue({
     state: libraryState,
@@ -113,6 +127,12 @@ function setLibraryResult(overrides: Partial<{
     recoveryBusy: false,
     editingAssetId: null,
     isDesktop: true,
+    previewTagRename: actions.previewTagRename,
+    cancelTagRenamePreview: actions.cancelTagRenamePreview,
+    applyTagRename: actions.applyTagRename,
+    renamePreviewing: false,
+    renameApplying: false,
+    renameProgress: 0,
     ...overrides,
   });
 }
@@ -129,6 +149,8 @@ function chooseFilter(label: string, option: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAppVersion).mockResolvedValue("Version 0.2.0");
+  vi.mocked(appUpdatesModule.checkForUpdates).mockResolvedValue({ status: "disabled", reason: "Disabled in test default" });
+  vi.mocked(appUpdatesModule.installUpdate).mockResolvedValue();
   actions.setTheme.mockResolvedValue(true);
   actions.previewAsset.mockResolvedValue({ kind: "unsupported", content: null, mimeType: null, truncated: false, message: "No preview available." });
   setLibraryResult();
@@ -1319,5 +1341,1233 @@ describe("scanned library UI", () => {
     expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
     expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
+  });
+
+  describe("in-app updates integration", () => {
+    it("performs silent background update check on mount when on desktop, disabled on browser", async () => {
+      const checkSpy = vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({
+        status: "available",
+        version: "0.5.0",
+        notes: "New release available",
+      });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /update available/i })).toBeDefined();
+      });
+      expect(checkSpy).toHaveBeenCalled();
+
+      cleanup();
+      checkSpy.mockClear();
+
+      setLibraryResult({ isDesktop: false });
+      render(<App />);
+
+      const button = screen.getByRole("button", { name: /check for updates/i });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect(checkSpy).not.toHaveBeenCalled();
+    });
+
+    it("allows manual offer confirmation and invokes installUpdate", async () => {
+      vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({
+        status: "available",
+        version: "0.5.0",
+        notes: "Release notes",
+      });
+      const installSpy = vi.spyOn(appUpdatesModule, "installUpdate").mockReturnValue(new Promise(() => {}));
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /update available/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toBeDefined();
+
+      const installBtn = within(dialog).getByRole("button", { name: /download and install/i });
+      fireEvent.click(installBtn);
+
+      expect(installSpy).toHaveBeenCalledWith("0.5.0", expect.any(Function));
+    });
+
+    it("blocks install when busy with scans, editing notes, or open dialogs", async () => {
+      vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({
+        status: "available",
+        version: "0.5.0",
+        notes: "Release notes",
+      });
+
+      // 1. Scanning
+      setLibraryResult({ scanning: true });
+      const { rerender } = render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /update available/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      let dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByText(/scan in progress/i)).toBeDefined();
+      let installBtn = within(dialog).getByRole("button", { name: /download and install/i });
+      expect((installBtn as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /later/i }));
+
+      // 2. Editing notes
+      setLibraryResult({ scanning: false, editingNotesAssetId: "asset-1" });
+      rerender(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByText(/notes edit in progress/i)).toBeDefined();
+      installBtn = within(dialog).getByRole("button", { name: /download and install/i });
+      expect((installBtn as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /later/i }));
+
+      // 3. Delete confirmation open
+      setLibraryResult({ editingNotesAssetId: null });
+      rerender(<App />);
+
+      fireEvent.click(assetRows()[0]);
+      fireEvent.click(screen.getByRole("button", { name: /delete this item/i }));
+      expect(screen.getByRole("dialog", { name: /delete/i })).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      const dialogs = screen.getAllByRole("dialog");
+      const updateDialog = dialogs.find((d) => within(d).queryByRole("button", { name: /download and install/i }));
+      expect(updateDialog).toBeDefined();
+      expect(within(updateDialog!).getByText(/delete confirmation open/i)).toBeDefined();
+      installBtn = within(updateDialog!).getByRole("button", { name: /download and install/i });
+      expect((installBtn as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("synchronously blocks install via getBlockedReason if an inline tag-add-input has unconfirmed text", async () => {
+      vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({
+        status: "available",
+        version: "0.5.0",
+        notes: "Release notes",
+      });
+      const installSpy = vi.spyOn(appUpdatesModule, "installUpdate");
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /update available/i })).toBeDefined();
+      });
+
+      const tagInputs = screen.getAllByRole("combobox", { name: "Add tag" });
+      fireEvent.change(tagInputs[0], { target: { value: "unconfirmed-tag-draft" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      const dialog = screen.getByRole("dialog");
+
+      const installBtn = within(dialog).getByRole("button", { name: /download and install/i });
+      expect((installBtn as HTMLButtonElement).disabled).toBe(false);
+
+      fireEvent.click(installBtn);
+
+      expect(installSpy).not.toHaveBeenCalled();
+      expect(within(dialog).getByText(/unsaved tag input draft/i)).toBeDefined();
+    });
+
+    it("sets .app-shell inert during installation while update dialog portal remains interactive", async () => {
+      vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({
+        status: "available",
+        version: "0.5.0",
+        notes: "Release notes",
+      });
+
+      let progressCb: ((p: any) => void) | undefined;
+      vi.spyOn(appUpdatesModule, "installUpdate").mockImplementation((_v, cb) => {
+        progressCb = cb;
+        return new Promise(() => {});
+      });
+
+      const { container } = render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /update available/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      const dialog = screen.getByRole("dialog");
+
+      const installBtn = within(dialog).getByRole("button", { name: /download and install/i });
+      fireEvent.click(installBtn);
+
+      const appShell = container.querySelector(".app-shell");
+      expect(appShell?.hasAttribute("inert")).toBe(true);
+
+      expect(appShell?.contains(dialog)).toBe(false);
+      expect(document.body.contains(dialog)).toBe(true);
+      expect(dialog.closest("[inert]")).toBeNull();
+
+      act(() => {
+        progressCb?.({ phase: "downloading", downloaded: 1000, total: 2000 });
+      });
+      expect(within(dialog).getByText(/50%/)).toBeDefined();
+    });
+
+    it("removes inert on install failure with literal native string rejection without clearing selection, query, or drafts", async () => {
+      vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({
+        status: "available",
+        version: "0.5.0",
+        notes: "Release notes",
+      });
+
+      const nativeError = "Update download or signature verification failed: invalid checksum";
+      vi.spyOn(appUpdatesModule, "installUpdate").mockRejectedValue(nativeError);
+
+      const { container } = render(<App />);
+
+      const searchInput = screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" });
+      fireEvent.change(searchInput, { target: { value: '"Gear"' } });
+      fireEvent.click(assetRows()[0]);
+      expect(assetRows()[0].getAttribute("aria-selected")).toBe("true");
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /update available/i })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      const dialog = screen.getByRole("dialog");
+
+      const installBtn = within(dialog).getByRole("button", { name: /download and install/i });
+      fireEvent.click(installBtn);
+
+      const appShell = container.querySelector(".app-shell");
+
+      await waitFor(() => {
+        expect(within(dialog).getByText(nativeError)).toBeDefined();
+      });
+
+      expect(appShell?.hasAttribute("inert")).toBe(false);
+      expect(searchInput.value).toBe('"Gear"');
+      expect(assetRows()[0].getAttribute("aria-selected")).toBe("true");
+    });
+  });
+});
+
+describe("tag rename menus", () => {
+  const renameTags = ["status", "status:printed", "oole:identity", "favorite"];
+  const taggedAsset: Asset = { ...assets[0], tags: renameTags, status: "ready" };
+  let rectSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  function sidebar(): HTMLElement {
+    return screen.getByRole("complementary", { name: "Library navigation" });
+  }
+  function tagButton(name: string): HTMLButtonElement {
+    return within(sidebar()).getByRole<HTMLButtonElement>("button", { name });
+  }
+  function groupButton(group: string): HTMLButtonElement {
+    return within(sidebar()).getByRole<HTMLButtonElement>("button", { name: `Actions for prefix group ${group}:` });
+  }
+  function renameRequest(): { mode: string | null; source: string | null } {
+    const dialog = screen.queryByRole("dialog", { name: /^Rename (tag|prefix group)$/ });
+    if (!dialog) return { mode: null, source: null };
+    const current = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Current name" }).value;
+    return within(dialog).queryByRole("heading", { name: "Rename prefix group" })
+      ? { mode: "prefix", source: current.replace(/:$/, "") }
+      : { mode: "exact", source: current };
+  }
+  function menuItems(menu: HTMLElement): string[] {
+    return within(menu).getAllByRole("menuitem").map((item) => item.textContent ?? "");
+  }
+  function mockRects(): void {
+    rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const box = (left: number, top: number, width: number, height: number) => ({ x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) });
+      if (this.classList.contains("tag-nav") || this.classList.contains("group-action")) return box(40, 180, 200, 26);
+      if (this.classList.contains("asset-context-menu")) return box(0, 0, 224, 90);
+      return box(0, 0, 0, 0);
+    });
+  }
+
+  beforeEach(() => {
+    setLibraryResult({ assets: [taggedAsset] });
+  });
+  afterEach(() => {
+    rectSpy?.mockRestore();
+    rectSpy = null;
+  });
+
+  it("opens a pointer menu with the exact action and the prefix action for a colon-bearing tag", () => {
+    render(<App />);
+    fireEvent.contextMenu(tagButton("identity1"), { clientX: 120, clientY: 220 });
+    const menu = screen.getByRole("menu", { name: "Actions for tag oole:identity" });
+    expect(menu.parentElement).toBe(document.body);
+    expect(within(menu).getByText("Tag oole:identity")).toBeTruthy();
+    expect(menuItems(menu)).toEqual(["Rename tag oole:identity", "Rename prefix group oole:"]);
+    expect(menu.className).toContain("asset-context-menu");
+  });
+
+  it("offers only the exact action for a plain tag", () => {
+    render(<App />);
+    fireEvent.contextMenu(tagButton("favorite1"));
+    expect(menuItems(screen.getByRole("menu", { name: "Actions for tag favorite" }))).toEqual(["Rename tag favorite"]);
+    expect(within(sidebar()).queryByRole("button", { name: "Actions for prefix group favorite:" })).toBeNull();
+  });
+
+  it("keeps a plain tag exact-only when a colon-bearing tag shares its first segment", () => {
+    render(<App />);
+    fireEvent.contextMenu(tagButton("status1"));
+    expect(menuItems(screen.getByRole("menu", { name: "Actions for tag status" }))).toEqual(["Rename tag status"]);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(tagButton("printed1"));
+    expect(menuItems(screen.getByRole("menu", { name: "Actions for tag status:printed" }))).toEqual(["Rename tag status:printed", "Rename prefix group status:"]);
+  });
+
+  it("offers the prefix action from the group action and never an exact action there", () => {
+    render(<App />);
+    fireEvent.contextMenu(groupButton("status"));
+    const menu = screen.getByRole("menu", { name: "Actions for prefix group status:" });
+    expect(within(menu).getByText("Prefix group status:")).toBeTruthy();
+    expect(menuItems(menu)).toEqual(["Rename prefix group status:"]);
+  });
+
+  it("opens the group menu from a click on the group action", () => {
+    render(<App />);
+    fireEvent.click(groupButton("oole"));
+    expect(menuItems(screen.getByRole("menu"))).toEqual(["Rename prefix group oole:"]);
+  });
+
+  it("labels the full normalized name and mode, not the displayed suffix or raw casing", () => {
+    setLibraryResult({ assets: [{ ...assets[0], tags: [" Mixed:Case "], status: "ready" }] });
+    render(<App />);
+    fireEvent.contextMenu(tagButton("Case1"));
+    const menu = screen.getByRole("menu", { name: "Actions for tag mixed:case" });
+    expect(menuItems(menu)).toEqual(["Rename tag mixed:case", "Rename prefix group mixed:"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Rename tag mixed:case" }));
+    expect(renameRequest()).toEqual({ mode: "exact", source: "mixed:case" });
+  });
+
+  it.each([
+    ["ContextMenu", { key: "ContextMenu" }],
+    ["Shift+F10", { key: "F10", shiftKey: true }],
+  ])("opens the menu with %s, prevents the default, and anchors to the element rect", (_name, init) => {
+    mockRects();
+    render(<App />);
+    const button = tagButton("identity1");
+    button.focus();
+    expect(fireEvent.keyDown(button, init)).toBe(false);
+    const menu = screen.getByRole("menu", { name: "Actions for tag oole:identity" });
+    expect(menu.style.left).toBe("40px");
+    expect(menu.style.top).toBe("206px");
+  });
+
+  it("does not open a menu for F10 without Shift or for other keys", () => {
+    render(<App />);
+    const button = tagButton("identity1");
+    expect(fireEvent.keyDown(button, { key: "F10" })).toBe(true);
+    expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("opens the group menu from the keyboard", () => {
+    render(<App />);
+    const button = groupButton("status");
+    expect(fireEvent.keyDown(button, { key: "F10", shiftKey: true })).toBe(false);
+    expect(menuItems(screen.getByRole("menu"))).toEqual(["Rename prefix group status:"]);
+  });
+
+  it("ignores the duplicate keyboard-origin contextmenu event", () => {
+    mockRects();
+    render(<App />);
+    const button = tagButton("identity1");
+    fireEvent.keyDown(button, { key: "ContextMenu" });
+    const duplicate = fireEvent.contextMenu(button, { clientX: 700, clientY: 500 });
+    expect(duplicate).toBe(false);
+    const menus = screen.getAllByRole("menu");
+    expect(menus).toHaveLength(1);
+    expect(menus[0].style.left).toBe("40px");
+    expect(menus[0].style.top).toBe("206px");
+  });
+
+  it("still opens a pointer menu after a keyboard-opened one once a real mouse press happens", () => {
+    mockRects();
+    render(<App />);
+    const button = tagButton("identity1");
+    fireEvent.keyDown(button, { key: "ContextMenu" });
+    fireEvent.mouseDown(button);
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(button, { clientX: 300, clientY: 400 });
+    expect(screen.getByRole("menu").style.left).toBe("300px");
+  });
+
+  it("focuses the first menu item on open and moves between items with the arrow keys", () => {
+    render(<App />);
+    fireEvent.contextMenu(tagButton("identity1"));
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(items[1], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[1]);
+  });
+
+  it.each([
+    ["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
+    ["outside click", () => fireEvent.mouseDown(document.body)],
+    ["wheel", () => fireEvent.wheel(window)],
+    ["Tab", () => fireEvent.keyDown(screen.getByRole("menu"), { key: "Tab" })],
+  ])("dismisses on %s and returns focus to the originating tag", (_name, dismiss) => {
+    render(<App />);
+    const button = tagButton("identity1");
+    button.focus();
+    fireEvent.contextMenu(button);
+    expect(document.activeElement).not.toBe(button);
+    dismiss();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(button);
+    expect(renameRequest()).toEqual({ mode: null, source: null });
+  });
+
+  it("returns focus to the group action after dismissing its menu", () => {
+    render(<App />);
+    const button = groupButton("oole");
+    fireEvent.contextMenu(button);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("keeps the tag menu inside the viewport", () => {
+    rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const big = this.classList.contains("asset-context-menu");
+      return { x: 0, y: 0, left: 0, top: 0, right: big ? 224 : 0, bottom: big ? 310 : 0, width: big ? 224 : 0, height: big ? 310 : 0, toJSON: () => ({}) };
+    });
+    render(<App />);
+    fireEvent.contextMenu(tagButton("identity1"), { clientX: window.innerWidth - 1, clientY: window.innerHeight - 1 });
+    const menu = screen.getByRole("menu");
+    expect(Number.parseFloat(menu.style.top) + 310).toBeLessThanOrEqual(window.innerHeight - 8);
+    expect(Number.parseFloat(menu.style.left) + 224).toBeLessThanOrEqual(window.innerWidth - 8);
+  });
+
+  it("focuses the originating tag before the menu closes and records the request", () => {
+    render(<App />);
+    const button = tagButton("identity1");
+    const menuMountedWhenFocused: boolean[] = [];
+    button.addEventListener("focus", () => menuMountedWhenFocused.push(document.querySelector(".asset-context-menu") !== null));
+    fireEvent.contextMenu(button);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename prefix group oole:" }));
+    expect(menuMountedWhenFocused).toEqual([true]);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(renameRequest()).toEqual({ mode: "prefix", source: "oole" });
+    // The dialog now takes focus, and returns it to the originating tag when it closes.
+    expect(document.activeElement).toBe(within(screen.getByRole("dialog", { name: "Rename prefix group" })).getByRole("textbox", { name: /^New name for/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("records an exact request from the exact action and a prefix request from the group action", () => {
+    render(<App />);
+    fireEvent.contextMenu(tagButton("printed1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename tag status:printed" }));
+    expect(renameRequest()).toEqual({ mode: "exact", source: "status:printed" });
+    // A second request is only possible once the first dialog is closed; see "second rename request while a dialog is open".
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(renameRequest()).toEqual({ mode: null, source: null });
+    const group = groupButton("status");
+    fireEvent.contextMenu(group);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename prefix group status:" }));
+    expect(renameRequest()).toEqual({ mode: "prefix", source: "status" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(group);
+  });
+
+  it("falls back to the TAGS header when the source tag is gone at dismissal", () => {
+    const { rerender } = render(<App />);
+    fireEvent.contextMenu(tagButton("favorite1"));
+    setLibraryResult({ assets: [{ ...taggedAsset, tags: ["status", "status:printed", "oole:identity"] }] });
+    rerender(<App />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    const header = within(sidebar()).getByText("TAGS", { selector: ".nav-section-label" });
+    expect(header.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(header);
+  });
+
+  it("restores focus to the tag after busy clears, not while its buttons are disabled", () => {
+    const { rerender } = render(<App />);
+    const button = tagButton("identity1");
+    fireEvent.contextMenu(button);
+    setLibraryResult({ assets: [taggedAsset], scanning: true });
+    rerender(<App />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).not.toBe(button);
+    setLibraryResult({ assets: [taggedAsset] });
+    rerender(<App />);
+    expect(document.activeElement).toBe(tagButton("identity1"));
+  });
+
+  it("does not open a menu or record a request while busy", () => {
+    setLibraryResult({ assets: [taggedAsset], scanning: true });
+    render(<App />);
+    fireEvent.contextMenu(tagButton("identity1"));
+    fireEvent.keyDown(groupButton("oole"), { key: "ContextMenu" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(renameRequest()).toEqual({ mode: null, source: null });
+  });
+
+  it("keeps a filter click as a filter and never starts a rename", () => {
+    render(<App />);
+    fireEvent.click(tagButton("identity1"));
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe("oole:identity");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(renameRequest()).toEqual({ mode: null, source: null });
+  });
+
+  it("does not nest buttons in the tag sidebar", () => {
+    render(<App />);
+    expect(sidebar().querySelectorAll("button button")).toHaveLength(0);
+  });
+
+  it("shows one menu at a time across row and tag menus", () => {
+    render(<App />);
+    fireEvent.contextMenu(assetRows()[0]);
+    fireEvent.contextMenu(tagButton("identity1"));
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(screen.getByRole("menu", { name: "Actions for tag oole:identity" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.contextMenu(assetRows()[0]);
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(screen.getByRole("menu", { name: "Actions for Gear.stl" })).toBeTruthy();
+  });
+
+  it("drops an open menu and a recorded request when the library changes", () => {
+    const { rerender } = render(<App />);
+    fireEvent.contextMenu(tagButton("favorite1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename tag favorite" }));
+    expect(renameRequest().source).toBe("favorite");
+    fireEvent.contextMenu(tagButton("identity1"));
+    setLibraryResult({ assets: [taggedAsset], library: secondLibrary, state: { ...libraryState, activeLibraryId: secondLibrary.id } });
+    rerender(<App />);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(renameRequest()).toEqual({ mode: null, source: null });
+  });
+});
+
+describe("tag rename integration", () => {
+  const exact: RenameMapping = { mode: "exact", source: "status:printed", destination: "state:printed" };
+  const prefix: RenameMapping = { mode: "prefix", source: "status", destination: "state" };
+
+  function file(relativePath: string, tags: string[], metadataRevision = "rev-a"): Asset {
+    return {
+      id: relativePath, name: relativePath.split("/").pop() ?? relativePath, relativePath, kind: "file", extension: "stl",
+      modifiedAt: "2026-10-01T10:00:00.000Z", sizeBytes: 1024, tags, status: tags.length ? "ready" : "untagged", metadataRevision,
+    };
+  }
+  function folder(relativePath: string, tags: string[] = [], metadataRevision = "rev-a"): Asset {
+    return { ...file(relativePath, tags, metadataRevision), kind: "folder", extension: null, modifiedAt: null, sizeBytes: null };
+  }
+  // Root shows Gear.stl and Models (printed x2); inside Models only Dragon.stl is printed, so the sidebar differs by folder.
+  const catalog: Asset[] = [
+    file("Gear.stl", ["status:printed", "favorite"]),
+    folder("Models", ["status:printed"]),
+    file("Models/Dragon.stl", ["status:printed"]),
+    file("Models/Elf.stl", ["favorite"]),
+    folder("Models/Deep"),
+    file("Models/Deep/Knight.stl", ["status:printed"]),
+  ];
+  function renamedCatalog(): Asset[] {
+    return catalog.map((asset) => ({ ...asset, metadataRevision: "rev-b", tags: asset.tags.map((tag) => tag === "status:printed" ? "state:printed" : tag) }));
+  }
+  function target(relativePath: string): RenameTargetSummary {
+    return { assetId: relativePath, relativePath, kind: "file", sidecarOwner: ".", duplicatesCollapsed: 0 };
+  }
+  function skippedRow(relativePath: string): RenameSkippedRow {
+    return { assetId: relativePath, relativePath, kind: "file", reason: "missing", message: null };
+  }
+  function previewFor(overrides: Partial<RenamePreview> = {}): RenamePreview {
+    const mapping = overrides.mapping ?? exact;
+    return {
+      previewId: "preview-1", libraryId: library.id, scanId: "scan-1", mapping,
+      scan: { libraryId: library.id, scanId: "scan-1", assets: catalog.map((asset) => ({ ...asset, metadataRevision: "rev-scan" })), issues: [], scannedAt: "2026-11-04T00:00:00Z" },
+      targets: [target("Gear.stl"), target("Models/Dragon.stl"), target("Models/Deep/Knight.stl")],
+      fileCount: 3, folderCount: 1, sidecarCount: 3, destinationExists: false, collisions: [], duplicatesCollapsed: 0,
+      skipped: [], uninspectable: [], savedSearchUpdateCount: 0, settingsRetry: false,
+      ...overrides,
+    };
+  }
+  function resultFor(overrides: Partial<RenameApplyResult> = {}): RenameApplyResult {
+    return {
+      previewId: "preview-1", libraryId: library.id, mapping: exact, committed: renamedCatalog().filter((asset) => asset.tags.includes("state:printed")),
+      failed: [], unattempted: [], failingSidecar: null, skipped: [], uninspectable: [], savedSearches: [], error: null, outcome: "complete", queryMigrated: true,
+      ...overrides,
+    };
+  }
+  function savedSearch(id: string, name: string, query: string, libraryId = library.id): SavedSearch {
+    return { id, libraryId, name, filters: { query, view: "all", matchMode: "all", kind: "all" } };
+  }
+  function deferred<T = void>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  let lastMigration: RenameMigration | null = null;
+  let searches: SavedSearch[] = [];
+
+  /** Preview mock that derives the migration with the real canonical helper, as the hook does. */
+  function wirePreview(preview: RenamePreview = previewFor()): void {
+    actions.previewTagRename.mockImplementation(async (input) => {
+      lastMigration = deriveRenameMigration({ libraryId: library.id, activeFilters: input.activeFilters, savedSearches: searches, mapping: preview.mapping });
+      return { status: "ready", preview, migration: lastMigration };
+    });
+  }
+  /** Apply mock that mirrors the hook's compare-and-set through the binding it is given. */
+  function wireApply(result: RenameApplyResult, gate?: Promise<void>): void {
+    actions.applyTagRename.mockImplementation(async (_previewId, binding) => {
+      if (gate) await gate;
+      const { before, after, changed } = lastMigration!.activeQuery;
+      let queryUpdated = false;
+      if (result.outcome === "complete" && result.queryMigrated && changed && binding.read() === before) { binding.write(after); queryUpdated = true; }
+      return { status: "applied", result, queryUpdated };
+    });
+  }
+
+  function sidebar(): HTMLElement {
+    return screen.getByRole("complementary", { name: "Library navigation" });
+  }
+  function tagButton(name: string): HTMLButtonElement {
+    return within(sidebar()).getByRole<HTMLButtonElement>("button", { name });
+  }
+  function renameDialog(): HTMLElement {
+    return screen.getByRole("dialog", { name: /^Rename (tag|prefix group)$/ });
+  }
+  function searchBox(): HTMLInputElement {
+    return screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" });
+  }
+  function notices(): HTMLElement | null {
+    return screen.queryByRole("region", { name: "Unfinished tag renames" });
+  }
+  function typeNewName(value: string): void {
+    fireEvent.change(within(renameDialog()).getByRole("textbox", { name: /^New name for/ }), { target: { value } });
+  }
+  async function pressIn(root: HTMLElement, name: string | RegExp): Promise<void> {
+    await act(async () => { fireEvent.click(within(root).getByRole("button", { name })); });
+  }
+  async function press(name: string | RegExp): Promise<void> {
+    await pressIn(renameDialog(), name);
+  }
+  function openRename(tag: string, item: string): void {
+    fireEvent.contextMenu(tagButton(tag));
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+  }
+  async function toConfirm(destination = "state:printed"): Promise<void> {
+    typeNewName(destination);
+    await press("Preview");
+    await press("Review rename");
+  }
+  async function runRename(destination = "state:printed"): Promise<void> {
+    await toConfirm(destination);
+    await press("Confirm rename");
+  }
+  async function closeWithEscape(): Promise<void> {
+    await act(async () => { fireEvent.keyDown(renameDialog(), { key: "Escape" }); });
+  }
+  /** Opens the in-app update dialog; the available-update mock must be set before App renders. */
+  async function openUpdateDialog(): Promise<HTMLElement> {
+    fireEvent.click(await screen.findByRole("button", { name: /update available/i }));
+    const updateDialog = screen.getAllByRole("dialog").find((candidate) => within(candidate).queryByRole("button", { name: /download and install/i }));
+    expect(updateDialog).toBeDefined();
+    return updateDialog!;
+  }
+  function offerUpdate(): void {
+    vi.mocked(appUpdatesModule.checkForUpdates).mockResolvedValue({ status: "available", version: "0.5.0", notes: "Release notes" });
+  }
+  function installButton(dialog: HTMLElement): HTMLButtonElement {
+    return within(dialog).getByRole<HTMLButtonElement>("button", { name: /download and install/i });
+  }
+  function switchLibrary(rerender: (ui: React.ReactElement) => void): void {
+    setLibraryResult({ assets: catalog, library: secondLibrary, state: { ...libraryState, activeLibraryId: secondLibrary.id } });
+    rerender(<App />);
+  }
+
+  beforeEach(() => {
+    actions.previewTagRename.mockReset();
+    actions.applyTagRename.mockReset();
+    actions.cancelTagRenamePreview.mockReset();
+    actions.cancelTagRenamePreview.mockResolvedValue(false);
+    lastMigration = null;
+    searches = [];
+    setLibraryResult({ assets: catalog });
+    wirePreview();
+    wireApply(resultFor());
+  });
+
+  describe("dialog mounting", () => {
+    it("mounts the real dialog for the recorded request and no longer leaks the request into data attributes", () => {
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      const dialog = renameDialog();
+      expect(within(dialog).getByRole("textbox", { name: "Current name" })).toHaveProperty("value", "status:printed");
+      expect(document.querySelector(".app-shell")!.hasAttribute("data-rename-mode")).toBe(false);
+      expect(document.querySelector(".app-shell")!.hasAttribute("data-rename-source")).toBe(false);
+    });
+
+    it("mounts a prefix dialog from the group action", () => {
+      render(<App />);
+      openRename("printed2", "Rename prefix group status:");
+      expect(screen.getByRole("dialog", { name: "Rename prefix group" })).toBeTruthy();
+      expect(within(renameDialog()).getByRole("textbox", { name: "Current name" })).toHaveProperty("value", "status:");
+    });
+
+    it("passes hook flags, scan progress and the live filters and library searches to the dialog", async () => {
+      searches = [savedSearch("s1", "Printed models", "status:printed"), savedSearch("s9", "Elsewhere", "status:printed", secondLibrary.id)];
+      setLibraryResult({ assets: catalog, savedSearches: searches.filter((search) => search.libraryId === library.id) });
+      const { rerender } = render(<App />);
+      fireEvent.change(searchBox(), { target: { value: "status:printed" } });
+      openRename("printed2", "Rename tag status:printed");
+      typeNewName("state:printed");
+      await press("Preview");
+      expect(actions.previewTagRename).toHaveBeenCalledExactlyOnceWith({
+        mode: "exact", source: "status:printed", destination: "state:printed",
+        activeFilters: { query: "status:printed", view: "all", matchMode: "all", kind: "all" },
+      });
+      expect(within(renameDialog()).getByText("Printed models")).toBeTruthy();
+      expect(within(renameDialog()).queryByText("Elsewhere")).toBeNull();
+
+      typeNewName("state:printed2");
+      setLibraryResult({ assets: catalog, savedSearches: [], renamePreviewing: true, renameProgress: 42 });
+      rerender(<App />);
+      expect(renameDialog().textContent).toMatch(/42 items visited/);
+    });
+
+    it("keeps the dialog open and never mounts a second one for the same request across hook updates", () => {
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      typeNewName("state:printed");
+      setLibraryResult({ assets: renamedCatalog() });
+      rerender(<App />);
+      expect(screen.getAllByRole("dialog", { name: "Rename tag" })).toHaveLength(1);
+      expect(within(renameDialog()).getByRole<HTMLInputElement>("textbox", { name: /^New name for/ }).value).toBe("state:printed");
+    });
+  });
+
+  describe("second rename request while a dialog is open", () => {
+    function noTagMenu(): void {
+      expect(screen.queryByRole("menu", { name: /^Actions for (tag|prefix group)/ })).toBeNull();
+    }
+
+    it("never opens a tag menu from the page behind the dialog, so the open dialog cannot receive new props", async () => {
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      typeNewName("state:printed");
+      await press("Preview");
+      expect(within(renameDialog()).getByRole("region", { name: "Rename preview" })).toBeTruthy();
+
+      // Focus has left the dialog (Shift+Tab from body text is not trapped); the page behind it is still reachable.
+      const other = tagButton("favorite1");
+      other.focus();
+      fireEvent.keyDown(other, { key: "F10", shiftKey: true });
+      noTagMenu();
+      fireEvent.keyDown(other, { key: "ContextMenu" });
+      noTagMenu();
+      fireEvent.contextMenu(other, { clientX: 40, clientY: 40 });
+      noTagMenu();
+      fireEvent.click(within(sidebar()).getByRole("button", { name: "Actions for prefix group status:" }));
+      noTagMenu();
+
+      expect(screen.getAllByRole("dialog", { name: /^Rename/ })).toHaveLength(1);
+      expect(screen.getByRole("dialog", { name: "Rename tag" })).toBeTruthy();
+      expect(within(renameDialog()).getByRole("textbox", { name: "Current name" })).toHaveProperty("value", "status:printed");
+      expect(within(renameDialog()).getByRole<HTMLInputElement>("textbox", { name: /^New name for/ }).value).toBe("state:printed");
+      expect(within(renameDialog()).getByRole("region", { name: "Rename preview" })).toBeTruthy();
+    });
+
+    it("opens tag menus again once the dialog is closed", async () => {
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await closeWithEscape();
+      fireEvent.contextMenu(tagButton("favorite1"), { clientX: 40, clientY: 40 });
+      expect(screen.getByRole("menu", { name: "Actions for tag favorite" })).toBeTruthy();
+    });
+  });
+
+  describe("whole-library counts (UA-6)", () => {
+    it.each([["the library root", false, "printed2"], ["a subfolder where the sidebar is scoped to that folder", true, "printed1"]])("shows whole-library counts from %s", async (_where, intoModels, sidebarName) => {
+      render(<App />);
+      if (intoModels) fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
+      openRename(sidebarName, "Rename tag status:printed");
+      typeNewName("state:printed");
+      await press("Preview");
+      const review = within(renameDialog()).getByRole("region", { name: "Rename preview" });
+      const count = (label: string) => within(review).getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
+      expect([count("Files"), count("Folders"), count("Sidecar files")]).toEqual(["3", "1", "3"]);
+      expect(review.textContent).toMatch(/whole active library, including subfolders, not only the folder you are viewing/);
+      // The sidebar stays scoped to the folder being viewed; only the dialog is whole-library.
+      expect(within(sidebar()).getByRole("button", { name: sidebarName }).textContent).toContain(sidebarName.slice(-1));
+    });
+  });
+
+  describe("session preservation", () => {
+    it("keeps selection, folder, sort and column layout through preview and apply", async () => {
+      const { rerender } = render(<App />);
+      fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
+      fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Path" }));
+      fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
+      fireEvent.mouseDown(screen.getByRole("separator", { name: "Resize NAME column" }), { clientX: 100 });
+      fireEvent.mouseMove(window, { clientX: 160 });
+      fireEvent.mouseUp(window);
+      const dragon = () => assetRows().find((row) => row.textContent?.includes("Dragon.stl"))!;
+      fireEvent.click(dragon());
+      const snapshot = () => ({
+        folder: screen.getByRole("navigation", { name: "Folder path" }).textContent,
+        sort: screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort"),
+        path: screen.queryByRole("columnheader", { name: "PATH" }),
+        width: (screen.getByRole("columnheader", { name: /^NAME/ }) as HTMLElement).style.width,
+        selected: dragon().getAttribute("aria-selected"),
+        order: assetRows().map((row) => row.getAttribute("title")),
+      });
+      const before = snapshot();
+      expect(before).toMatchObject({ sort: "descending", path: null, width: "315px", selected: "true" });
+      expect(before.folder).toContain("Models");
+
+      openRename("printed1", "Rename tag status:printed");
+      typeNewName("state:printed");
+      await press("Preview");
+      // The hook replaces the catalog behind the modal with the fresh scan.
+      setLibraryResult({ assets: previewFor().scan.assets });
+      rerender(<App />);
+      expect(snapshot()).toEqual(before);
+
+      await press("Review rename");
+      await press("Confirm rename");
+      setLibraryResult({ assets: renamedCatalog() });
+      rerender(<App />);
+      expect(snapshot()).toEqual(before);
+      expect(within(renameDialog()).getByRole("heading", { name: "Rename complete" })).toBeTruthy();
+    });
+  });
+
+  describe("active query", () => {
+    const quoted = 'status:printed "Flexi status:printed Dragon"';
+
+    it("migrates the active query on complete success and preserves quoted path text", async () => {
+      render(<App />);
+      fireEvent.change(searchBox(), { target: { value: quoted } });
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      expect(searchBox().value).toBe('state:printed "Flexi status:printed Dragon"');
+      expect(within(renameDialog()).getByText("Active query updated.")).toBeTruthy();
+    });
+
+    it("hands the hook a binding that reads the live query at completion, so a mid-flight edit is never overwritten", async () => {
+      const gate = deferred();
+      wireApply(resultFor(), gate.promise);
+      render(<App />);
+      fireEvent.change(searchBox(), { target: { value: quoted } });
+      openRename("printed2", "Rename tag status:printed");
+      await toConfirm();
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Confirm rename" })); });
+      expect(actions.applyTagRename).toHaveBeenCalledOnce();
+      expect(actions.applyTagRename.mock.calls[0]?.[0]).toBe("preview-1");
+      fireEvent.change(searchBox(), { target: { value: "my own search" } });
+      await act(async () => { gate.resolve(); });
+      expect(searchBox().value).toBe("my own search");
+      expect(within(renameDialog()).getByText(/edited while the rename ran, so it was left as you typed it/)).toBeTruthy();
+    });
+
+    it.each([
+      ["partial", () => resultFor({ outcome: "partial", queryMigrated: false, committed: [renamedCatalog()[0]!], failed: [target("Models/Dragon.stl")], unattempted: [target("Models/Deep/Knight.stl")], failingSidecar: "Models", error: { message: "Disk full", path: null, details: null } })],
+      ["settings-failed", () => resultFor({ outcome: "settings-failed", queryMigrated: false, error: { message: "Settings file is read-only", path: null, details: null } })],
+    ])("leaves the active query alone after a %s outcome and shows the old-query limitation", async (_name, build) => {
+      wireApply(build());
+      render(<App />);
+      fireEvent.change(searchBox(), { target: { value: quoted } });
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      expect(searchBox().value).toBe(quoted);
+      expect(renameDialog().textContent).toMatch(/active query/i);
+      expect(renameDialog().textContent).toMatch(/still use the old name|were not changed|not updated/);
+    });
+  });
+
+  describe("skipped rows", () => {
+    it("warns before confirming and after completing that skipped rows may keep the old tag", async () => {
+      wirePreview(previewFor({ skipped: [skippedRow("Gone/Old.stl")] }));
+      wireApply(resultFor({ skipped: [skippedRow("Gone/Old.stl")] }));
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await toConfirm();
+      expect(within(renameDialog()).getByRole("region", { name: "Confirm rename" }).textContent).toMatch(/1 skipped row keeps its old tag/);
+      await press("Confirm rename");
+      expect(within(renameDialog()).getByText(/1 skipped row may still have the old tag/)).toBeTruthy();
+    });
+  });
+
+  describe("persistent outcome notice (UA-2)", () => {
+    const partial = () => resultFor({
+      outcome: "partial", queryMigrated: false, committed: [renamedCatalog()[0]!], failed: [target("Models/Dragon.stl")], unattempted: [target("Models/Deep/Knight.stl")],
+      failingSidecar: "Models", error: { message: "Disk full", path: null, details: null },
+    });
+    const settingsFailed = () => resultFor({ outcome: "settings-failed", queryMigrated: false, error: { message: "Settings file is read-only", path: null, details: null } });
+
+    it("shows no notice for a complete outcome", async () => {
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+      expect(notices()).toBeNull();
+    });
+
+    it.each([
+      ["partial", "Escape", partial, /1 of 3 rows were renamed/],
+      ["settings-failed", "Escape", settingsFailed, /saved searches were not updated/i],
+      ["partial", "backdrop", partial, /1 of 3 rows were renamed/],
+      ["settings-failed", "backdrop", settingsFailed, /saved searches were not updated/i],
+    ] as const)("keeps a %s notice with retry access after %s dismissal, near the active filter", async (_name, how, build, text) => {
+      wireApply(build());
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      if (how === "Escape") await closeWithEscape();
+      else fireEvent.mouseDown(renameDialog().parentElement!);
+      expect(screen.queryByRole("dialog", { name: /^Rename/ })).toBeNull();
+      const region = notices()!;
+      expect(region).toBeTruthy();
+      expect(region.textContent).toMatch(text);
+      expect(region.textContent).toMatch(/status:printed to state:printed/);
+      expect(region.textContent).toMatch(/still use the old name/);
+      expect(within(region).getByRole("button", { name: /^Review outcome and retry/ })).toBeTruthy();
+      const filterBar = document.querySelector(".filter-bar")!;
+      expect(filterBar.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(region.closest(".catalog-panel")).toBeTruthy();
+    });
+
+    it("reopens on the outcome from the notice and finishes with a complete retry, which clears the notice", async () => {
+      wireApply(partial());
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+
+      wirePreview(previewFor({ previewId: "preview-2", targets: [target("Models/Dragon.stl"), target("Models/Deep/Knight.stl")] }));
+      wireApply(resultFor({ previewId: "preview-2" }));
+      await pressIn(notices()!, /^Review outcome and retry/);
+      expect(within(renameDialog()).getByRole("heading", { name: "Rename partly applied" })).toBeTruthy();
+      await press("Preview remaining rows");
+      expect(actions.previewTagRename).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "exact", source: "status:printed", destination: "state:printed" }));
+      await press("Review rename");
+      await press("Confirm rename");
+      expect(within(renameDialog()).getByRole("heading", { name: "Rename complete" })).toBeTruthy();
+      expect(notices()).toBeNull();
+    });
+
+    it("keeps one notice per rename so a later failure never hides an earlier one", async () => {
+      wireApply(settingsFailed());
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+      wirePreview(previewFor({ mapping: prefix }));
+      wireApply(resultFor({ mapping: prefix, outcome: "settings-failed", queryMigrated: false, error: { message: "Settings file is read-only", path: null, details: null } }));
+      openRename("printed2", "Rename prefix group status:");
+      await runRename("state");
+      await closeWithEscape();
+      expect(within(notices()!).getAllByRole("button", { name: /^Review outcome and retry/ })).toHaveLength(2);
+      // Completing one leaves the other.
+      wirePreview(previewFor({ previewId: "preview-3", targets: [], fileCount: 0, folderCount: 0, sidecarCount: 0, settingsRetry: true, savedSearchUpdateCount: 1 }));
+      wireApply(resultFor({ previewId: "preview-3", committed: [] }));
+      await pressIn(notices()!, /^Review outcome and retry: status:printed to state:printed/);
+      await press("Preview settings retry");
+      await press("Review rename");
+      await press("Confirm rename");
+      await closeWithEscape();
+      expect(within(notices()!).getAllByRole("button", { name: /^Review outcome and retry/ })).toHaveLength(1);
+      expect(notices()!.textContent).toMatch(/status: to state:/);
+    });
+
+    it("clears the notice, and closes any dialog, when the library changes", async () => {
+      wireApply(settingsFailed());
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+      expect(notices()).toBeTruthy();
+      switchLibrary(rerender);
+      expect(notices()).toBeNull();
+      expect(screen.queryByRole("dialog", { name: /^Rename/ })).toBeNull();
+    });
+
+    it("ignores an outcome reported for a library that is no longer active", async () => {
+      const gate = deferred();
+      wireApply(settingsFailed(), gate.promise);
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await toConfirm();
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Confirm rename" })); });
+      switchLibrary(rerender);
+      await act(async () => { gate.resolve(); });
+      expect(notices()).toBeNull();
+    });
+
+    it("keeps a notice when an unrelated rename later completes", async () => {
+      wireApply(settingsFailed());
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+      wirePreview(previewFor({ previewId: "preview-9", mapping: { mode: "exact", source: "favorite", destination: "starred" } }));
+      wireApply(resultFor({ previewId: "preview-9", mapping: { mode: "exact", source: "favorite", destination: "starred" } }));
+      openRename("favorite1", "Rename tag favorite");
+      await runRename("starred");
+      await closeWithEscape();
+      expect(notices()).toBeTruthy();
+    });
+  });
+
+  describe("zero-target retry and nothing left to migrate (UA2-3)", () => {
+    const settingsFailed = () => resultFor({
+      outcome: "settings-failed", queryMigrated: false, error: { message: "Settings file is read-only", path: null, details: null },
+      savedSearches: [savedSearch("s1", "Printed models", "status:printed")],
+    });
+
+    async function reachNotice(): Promise<void> {
+      searches = [savedSearch("s1", "Printed models", "status:printed")];
+      setLibraryResult({ assets: catalog, savedSearches: searches });
+      wireApply(settingsFailed());
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+    }
+
+    it("completes a settings-only retry with zero targets, migrates the saved search and clears the notice", async () => {
+      render(<App />);
+      await reachNotice();
+      wirePreview(previewFor({ previewId: "preview-2", targets: [], fileCount: 0, folderCount: 0, sidecarCount: 0, settingsRetry: true, savedSearchUpdateCount: 1 }));
+      wireApply(resultFor({ previewId: "preview-2", committed: [], savedSearches: [savedSearch("s1", "Printed models", "state:printed")] }));
+      await pressIn(notices()!, /^Review outcome and retry/);
+      await press("Preview settings retry");
+      expect(within(renameDialog()).getByText(/finishes the saved-search and active-query update from a rename already saved/i)).toBeTruthy();
+      await press("Review rename");
+      await press("Confirm rename");
+      expect(actions.applyTagRename).toHaveBeenLastCalledWith("preview-2", expect.anything());
+      expect(within(renameDialog()).getByText(/Finished the saved-search update/)).toBeTruthy();
+      expect(notices()).toBeNull();
+    });
+
+    it("lets the user dismiss the notice when no saved search is left to migrate", async () => {
+      render(<App />);
+      await reachNotice();
+      wirePreview(previewFor({ previewId: "preview-2", targets: [], fileCount: 0, folderCount: 0, sidecarCount: 0, settingsRetry: true, savedSearchUpdateCount: 0 }));
+      await pressIn(notices()!, /^Review outcome and retry/);
+      await press("Preview settings retry");
+      expect(within(renameDialog()).getByText(/nothing remains to migrate/i)).toBeTruthy();
+      expect(within(renameDialog()).queryByRole("button", { name: "Review rename" })).toBeNull();
+      await press("Dismiss notice");
+      expect(notices()).toBeNull();
+      expect(screen.queryByRole("dialog", { name: /^Rename/ })).toBeNull();
+    });
+
+    it("explains a rejected retry proof as 'saved searches changed; correct them manually' and lets the user dismiss it", async () => {
+      const { rerender } = render(<App />);
+      await reachNotice();
+      wirePreview(previewFor({ previewId: "preview-2", targets: [], fileCount: 0, folderCount: 0, sidecarCount: 0, settingsRetry: true, savedSearchUpdateCount: 1 }));
+      const gate = deferred();
+      actions.applyTagRename.mockImplementation(async () => {
+        await gate.promise;
+        return { status: "failed" };
+      });
+      await pressIn(notices()!, /^Review outcome and retry/);
+      await press("Preview settings retry");
+      await press("Review rename");
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Confirm rename" })); });
+      // The hook records the native rejection before the call settles.
+      setLibraryResult({ assets: catalog, savedSearches: searches, error: { message: "No editable rename targets and no verified settings retry; preview again", path: null, details: null } });
+      rerender(<App />);
+      await act(async () => { gate.resolve(); });
+      expect(within(renameDialog()).getByRole("alert").textContent).toMatch(/saved searches changed; correct them manually/i);
+      await press("Dismiss notice");
+      expect(notices()).toBeNull();
+      expect(screen.queryByRole("dialog", { name: /^Rename/ })).toBeNull();
+    });
+  });
+
+  describe("updater blockers (UA-1, UA-9)", () => {
+    it("allows installation when no rename state exists", async () => {
+      offerUpdate();
+      render(<App />);
+      expect(installButton(await openUpdateDialog()).disabled).toBe(false);
+    });
+
+    it("blocks installation while the rename dialog is open, even before any preview", async () => {
+      offerUpdate();
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      const updateDialog = await openUpdateDialog();
+      expect(within(updateDialog).getByText(/tag rename dialog open/i)).toBeTruthy();
+      expect(installButton(updateDialog).disabled).toBe(true);
+      fireEvent.click(installButton(updateDialog));
+      expect(vi.mocked(appUpdatesModule.installUpdate)).not.toHaveBeenCalled();
+    });
+
+    it("blocks installation once a preview is ready and while the apply is confirmed", async () => {
+      offerUpdate();
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await toConfirm();
+      const updateDialog = await openUpdateDialog();
+      expect(within(updateDialog).getByText(/tag rename dialog open/i)).toBeTruthy();
+      expect(installButton(updateDialog).disabled).toBe(true);
+    });
+
+    it.each([
+      ["previewing", { renamePreviewing: true }],
+      ["applying", { renameApplying: true }],
+    ] as const)("blocks installation with the in-progress reason while the hook reports %s", async (_name, flags) => {
+      offerUpdate();
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      setLibraryResult({ assets: catalog, ...flags });
+      rerender(<App />);
+      const updateDialog = await openUpdateDialog();
+      expect(within(updateDialog).getByText(/tag rename in progress/i)).toBeTruthy();
+      expect(installButton(updateDialog).disabled).toBe(true);
+    });
+
+    it("blocks installation while an unresolved retry notice remains after the dialog closed, and unblocks once it is resolved", async () => {
+      offerUpdate();
+      wireApply(resultFor({ outcome: "settings-failed", queryMigrated: false, error: { message: "Settings file is read-only", path: null, details: null } }));
+      render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await runRename();
+      await closeWithEscape();
+      let updateDialog = await openUpdateDialog();
+      expect(within(updateDialog).getByText(/tag rename not finished/i)).toBeTruthy();
+      expect(installButton(updateDialog).disabled).toBe(true);
+      fireEvent.click(within(updateDialog).getByRole("button", { name: /later/i }));
+
+      wirePreview(previewFor({ previewId: "preview-2", targets: [], fileCount: 0, folderCount: 0, sidecarCount: 0, settingsRetry: true, savedSearchUpdateCount: 0 }));
+      await pressIn(notices()!, /^Review outcome and retry/);
+      await press("Preview settings retry");
+      await press("Dismiss notice");
+      updateDialog = await openUpdateDialog();
+      expect(installButton(updateDialog).disabled).toBe(false);
+    });
+
+    it("keeps the fixed update checks ahead of the rename reasons", async () => {
+      offerUpdate();
+      setLibraryResult({ assets: catalog, scanning: true });
+      render(<App />);
+      const updateDialog = await openUpdateDialog();
+      expect(within(updateDialog).getByText(/scan in progress/i)).toBeTruthy();
+    });
+  });
+
+  describe("busy controls and the hook error", () => {
+    it("disables the library picker and sidebar tag actions while a preview or apply runs", () => {
+      const { rerender } = render(<App />);
+      expect(tagButton("favorite1").disabled).toBe(false);
+      for (const flags of [{ renamePreviewing: true }, { renameApplying: true }]) {
+        setLibraryResult({ assets: catalog, ...flags });
+        rerender(<App />);
+        expect(tagButton("favorite1").disabled).toBe(true);
+        expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Rescan$/ }).disabled).toBe(true);
+      }
+    });
+
+    it("shows the hook error once, inside the dialog, and dismisses it when the dialog closes", async () => {
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      actions.dismissError.mockClear();
+      setLibraryResult({ assets: catalog, error: { message: "Preview exploded", path: null, details: null } });
+      rerender(<App />);
+      expect(screen.queryByRole("button", { name: "Dismiss error" })).toBeNull();
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Cancel" })); });
+      expect(actions.dismissError).toHaveBeenCalledOnce();
+    });
+
+    it("clears an error that predates the dialog when it opens", () => {
+      setLibraryResult({ assets: catalog, error: { message: "Older failure", path: null, details: null } });
+      render(<App />);
+      actions.dismissError.mockClear();
+      openRename("printed2", "Rename tag status:printed");
+      expect(actions.dismissError).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("stale work and focus", () => {
+    it("closes the dialog and cancels a running preview when the library changes", () => {
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      actions.cancelTagRenamePreview.mockClear();
+      switchLibrary(rerender);
+      expect(screen.queryByRole("dialog", { name: /^Rename/ })).toBeNull();
+      expect(actions.cancelTagRenamePreview).toHaveBeenCalledOnce();
+    });
+
+    it("cancels a running preview natively and leaves the catalog, selection and notices untouched", async () => {
+      const gate = deferred<import("./useLibrary").RenamePreviewResult>();
+      actions.previewTagRename.mockImplementation(() => gate.promise);
+      render(<App />);
+      fireEvent.click(assetRows()[0]!);
+      openRename("printed2", "Rename tag status:printed");
+      typeNewName("state:printed");
+      await press("Preview");
+      await act(async () => { fireEvent.keyDown(renameDialog(), { key: "Escape" }); });
+      expect(actions.cancelTagRenamePreview).toHaveBeenCalledOnce();
+      await act(async () => { gate.resolve({ status: "cancelled" }); });
+      expect(within(renameDialog()).getByText(/Preview cancelled\. Nothing was changed/)).toBeTruthy();
+      expect(assetRows()[0]!.getAttribute("aria-selected")).toBe("true");
+      expect(actions.applyTagRename).not.toHaveBeenCalled();
+      await act(async () => { fireEvent.keyDown(renameDialog(), { key: "Escape" }); });
+      expect(notices()).toBeNull();
+    });
+
+    it("ignores an apply result that arrives after the app unmounted", async () => {
+      const gate = deferred();
+      wireApply(resultFor({ outcome: "settings-failed", queryMigrated: false, error: { message: "Settings file is read-only", path: null, details: null } }), gate.promise);
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      const view = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      await toConfirm();
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Confirm rename" })); });
+      view.unmount();
+      await act(async () => { gate.resolve(); });
+      expect(errors).not.toHaveBeenCalled();
+      errors.mockRestore();
+    });
+
+    it("does not reopen the dialog for the new library", () => {
+      const { rerender } = render(<App />);
+      openRename("printed2", "Rename tag status:printed");
+      switchLibrary(rerender);
+      setLibraryResult({ assets: catalog });
+      rerender(<App />);
+      expect(screen.queryByRole("dialog", { name: /^Rename/ })).toBeNull();
+    });
+
+    it("returns focus to the originating tag when the dialog is cancelled", async () => {
+      render(<App />);
+      const origin = tagButton("favorite1");
+      origin.focus();
+      openRename("favorite1", "Rename tag favorite");
+      expect(document.activeElement).toBe(within(renameDialog()).getByRole("textbox", { name: /^New name for/ }));
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Cancel" })); });
+      expect(document.activeElement).toBe(tagButton("favorite1"));
+    });
+
+    it("falls back to the TAGS header when the renamed tag has disappeared at close", async () => {
+      const { rerender } = render(<App />);
+      const favorite = { mode: "exact", source: "favorite", destination: "starred" } as const;
+      wirePreview(previewFor({ mapping: favorite }));
+      wireApply(resultFor({ mapping: favorite }));
+      openRename("favorite1", "Rename tag favorite");
+      await runRename("starred");
+      setLibraryResult({ assets: catalog.map((asset) => ({ ...asset, tags: asset.tags.map((tag) => tag === "favorite" ? "starred" : tag) })) });
+      rerender(<App />);
+      await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Close" })); });
+      const header = within(sidebar()).getByText("TAGS", { selector: ".nav-section-label" });
+      expect(document.activeElement).toBe(header);
+    });
   });
 });
