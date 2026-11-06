@@ -1,0 +1,15 @@
+{
+  "version": "0.5.0",
+  "notes": "Automated unsigned prerelease built from `6e9fd120637bfcdf1ec3aac9ec6ab53e6c19e913` after Windows checks passed on `3649c5d02b9a8ae4060456a95c901b6098a2f767`.\n\nmacOS packages (Apple Silicon) have no Developer ID signing or notarization, and the Windows x64 installer is unsigned; platform warnings may block installation. Verify downloads against `SHA256SUMS.txt`.\n\n[Code signing policy](https://github.com/minhtrancmvn/tag-based-asset-manager#code-signing-policy) · [MIT License](https://github.com/minhtrancmvn/tag-based-asset-manager/blob/6e9fd120637bfcdf1ec3aac9ec6ab53e6c19e913/LICENSE)\n## What's Changed\n* feat: add library-wide tag rename and signed updater preview by @minhtrancmvn in https://github.com/minhtrancmvn/tag-based-asset-manager/pull/13\n\n\n**Full Changelog**: https://github.com/minhtrancmvn/tag-based-asset-manager/compare/v0.4.0...v0.5.0",
+  "pub_date": "2026-11-06T08:37:24.275Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSekx2RXhjTDNXZWdIV3lvNTZ3dlZhVnNmSk92N3A2OUQvZnkrTGdkQnp3aTRSYnBqaHE1WXVYcnBOUjR0aEV4L2U5dFpRUS9CRFQ2Yk1PeXRLUGh6TlBaVlRPaGR5ZndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTU0MDcwCWZpbGU6VGFnLUJhc2VkLUFzc2V0LU1hbmFnZXJfMC41LjBfYWFyY2g2NC5hcHAudGFyLmd6CXZlcnNpb246MC41LjAKMk9JYXViKzBleldQWVhPZk9pWUlkR2w1YWxHa2xubW9hZzVmN2VHWTd0NlRFWXJCUzhMYkZFSXJBa3VXNjZ5WjZEZ0VlTE82cDRsOVVVOXRmMGR2RFE9PQ==",
+      "url": "https://github.com/minhtrancmvn/tag-based-asset-manager/releases/download/v0.5.0/Tag-Based-Asset-Manager_0.5.0_aarch64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSekx2RXhjTDNXZXFLSGpGSGNlNjR6QkFjWWF1WG1QZXAxZnc2NHpoNVdLa29BbXp3VExnNzBTdFM0MUd2SkxjNnZsalI2K2s0Y1ZlZWlHUnMzTXE2cmdxdCs0MkUxb2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTU0MjIwCWZpbGU6VGFnLUJhc2VkLUFzc2V0LU1hbmFnZXJfMC41LjBfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuNS4wCnJsMFRBV0tUNHFzV3AxMjhXbUpBRzA1djNyNkVpS0hvZTB2Q05VYTdBKzNHTGJnQWN5bzVxRnJQQlEzVldlTkw3NGpnNHQwbFV6SUtXZVhESS9LaEFBPT0=",
+      "url": "https://github.com/minhtrancmvn/tag-based-asset-manager/releases/download/v0.5.0/Tag-Based-Asset-Manager_0.5.0_x64-setup.exe"
+    }
+  }
+}
