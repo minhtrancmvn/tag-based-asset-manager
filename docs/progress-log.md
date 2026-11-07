@@ -421,3 +421,15 @@ On macOS the PC keyboard's context-menu key reaches WebKit's own menu, which off
 - Gatekeeper and quarantine behaviour of the downloaded package.
 - The context-menu key on Windows.
 - M3-17 and M4-14 on a slow filesystem.
+
+## Microsoft Store MSIX package (2026-11-07)
+
+PR #16 adds a Microsoft Store edition. Builds compiled with `TAG_ASSET_MANAGER_STORE_BUILD=1` refuse the in-app update check and install before any network request; the Store installs their updates. The edition uses its own Tauri identifier (`com.tagbasedassetmanager.store`), so its settings stay separate from the GitHub copy. The manual workflow **Microsoft Store package** packs an unsigned MSIX for Partner Center and test-signed `.0`/`.1` copies for sideloading. Package identity comes from Partner Center: the `Publisher` derives the given package family name, and the account owner confirmed `DisplayName` and `PublisherDisplayName`. Details and the test are in [Microsoft Store edition](microsoft-store.md).
+
+Verification:
+
+- macOS: `cargo fmt --check`, strict Clippy, 285 Rust tests (1 ignored) on a clean checkout, 902 frontend tests, actionlint on all workflows.
+- GitHub Actions on `windows-latest`: Windows checks and the Store package workflow green on commit `64204c7` (run 42238367518). The downloaded artifacts were checked: checksums, identity, versions `0.5.2.0`/`0.5.2.1`, upload package unsigned, test copies signed by a certificate whose subject matches the publisher.
+- Windows 11 x64, the account owner's PC: STORE-01 to STORE-10 all passed, as reported by the account owner. This is the first native Windows run of the app. It covered a fresh start, the Store update message, folder picker and scan, tagging with restart, open/reveal/copy, JSON export, Recycle Bin delete, in-place upgrade from `.0` to `.1`, side-by-side with the GitHub copy, and uninstall keeping library files.
+
+Not done: Partner Center upload and certification; the GitHub NSIS installer and the rest of the manual test plan on Windows; Windows 10.

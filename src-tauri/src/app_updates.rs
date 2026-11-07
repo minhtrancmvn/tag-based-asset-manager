@@ -48,6 +48,29 @@ fn configured_key() -> Option<&'static str> {
         .filter(|key| !key.is_empty())
 }
 
+/// Microsoft Store packages are compiled with this set to `1`; the Store delivers their updates.
+fn store_build() -> bool {
+    option_env!("TAG_ASSET_MANAGER_STORE_BUILD").is_some_and(|value| value.trim() == "1")
+}
+
+const STORE_UPDATES: &str = "This copy is from the Microsoft Store, which installs its updates.";
+
+/// The updater key, or why this build must not contact the GitHub feed. Decided before any network request.
+fn usable_key(
+    store: bool,
+    os: &str,
+    arch: &str,
+    key: Option<&'static str>,
+) -> Result<&'static str, &'static str> {
+    if store {
+        return Err(STORE_UPDATES);
+    }
+    if !supported_platform(os, arch) {
+        return Err("Updates currently support macOS Apple Silicon and Windows x64 only.");
+    }
+    key.ok_or("Updates are not configured in this build. Install a published build manually until updater signing is set up.")
+}
+
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum UpdateCheck {
@@ -90,13 +113,18 @@ pub async fn check_for_updates(
         .pending
         .lock()
         .map_err(|_| "Update state unavailable")? = None;
-    if !supported_platform(std::env::consts::OS, std::env::consts::ARCH) {
-        return Ok(UpdateCheck::Disabled {
-            reason: "Updates currently support macOS Apple Silicon and Windows x64 only.".into(),
-        });
-    }
-    let Some(key) = configured_key() else {
-        return Ok(UpdateCheck::Disabled { reason: "Updates are not configured in this build. Install a published build manually until updater signing is set up.".into() });
+    let key = match usable_key(
+        store_build(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        configured_key(),
+    ) {
+        Ok(key) => key,
+        Err(reason) => {
+            return Ok(UpdateCheck::Disabled {
+                reason: reason.into(),
+            })
+        }
     };
     validate_key(key)?;
     let updater = app
@@ -171,6 +199,12 @@ pub async fn install_update(
     on_progress: Channel<UpdateProgress>,
 ) -> Result<(), String> {
     let _busy = state.begin()?;
+    usable_key(
+        store_build(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        configured_key(),
+    )?;
     let update = state
         .pending
         .lock()
@@ -318,6 +352,22 @@ mod tests {
             .unwrap()
             .iter()
             .any(|p| p.as_str().is_some_and(|p| p.starts_with("updater:"))));
+    }
+
+    #[test]
+    fn store_builds_never_use_the_github_updater() {
+        let key = Some("key");
+        assert_eq!(
+            usable_key(true, "windows", "x86_64", key),
+            Err(STORE_UPDATES)
+        );
+        assert_eq!(
+            usable_key(true, "macos", "aarch64", None),
+            Err(STORE_UPDATES)
+        );
+        assert_eq!(usable_key(false, "windows", "x86_64", key), Ok("key"));
+        assert!(usable_key(false, "linux", "x86_64", key).is_err());
+        assert!(usable_key(false, "windows", "x86_64", None).is_err());
     }
 
     #[test]
