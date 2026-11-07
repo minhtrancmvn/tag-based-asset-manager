@@ -1,6 +1,6 @@
 # Microsoft Store edition
 
-Status (2026-11-06): the Store build and MSIX packaging exist. Nothing has been installed on Windows, uploaded to Partner Center or submitted for certification yet.
+Status (2026-11-07): the Store build and MSIX packaging exist, and the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10). Nothing has been uploaded to Partner Center or submitted for certification yet.
 
 ## What differs from the GitHub download
 
@@ -34,8 +34,15 @@ Artifacts, kept for 14 days:
 Use a throwaway copy of `fixtures/sample-library` (copy the folder somewhere like `Documents\store-test-library`), never a real library.
 
 1. Download `store-msix-test-signed` from the workflow run and unzip it.
-2. Trust the test certificate: right-click `test-signing-certificate.cer` → **Install Certificate** → **Local Machine** → **Place all certificates in the following store** → **Trusted People**. This needs administrator rights.
-3. Double-click `Tag-Based-Asset-Manager_<version>.0_x64.msix` → **Install**.
+2. Trust the test certificate in **Local Machine → Trusted People**. The certificate import wizard's automatic store choice, or a Current User import, leaves the installer showing "Publisher: Unknown" and "This app package's publisher certificate could not be verified". In PowerShell run as administrator, from the unzipped folder:
+
+   ```powershell
+   (Get-FileHash .\test-signing-certificate.cer -Algorithm SHA256).Hash   # must match its line in SHA256SUMS.txt
+   Import-Certificate -FilePath .\test-signing-certificate.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+   ```
+
+   Note the thumbprint it prints; each workflow run makes a new certificate.
+3. Double-click `Tag-Based-Asset-Manager_<version>.0_x64.msix` → **Install**. The publisher now reads `CN=26BEF0A5-…`.
 
 Record each result:
 
@@ -52,7 +59,11 @@ Record each result:
 | STORE-09 | If the GitHub copy is installed, open it | Its own libraries and settings are unchanged |
 | STORE-10 | Settings → Apps → uninstall the Store copy | Uninstalls; the throwaway library's files and `.asset-tags.json` stay |
 
-Clean up afterwards: open `certlm.msc` → **Trusted People** → **Certificates** and delete **Tag-Based Asset Manager MSIX test only**, then delete the throwaway library.
+Clean up afterwards: in PowerShell run as administrator, `Remove-Item Cert:\LocalMachine\TrustedPeople\<thumbprint>` (or `certlm.msc` → **Trusted People** → **Certificates** → delete **Tag-Based Asset Manager MSIX test only**), then delete the throwaway library.
+
+### Results
+
+2026-11-07, Windows 11 x64, the account owner's PC, test-signed packages `0.5.2.0` and `0.5.2.1` from workflow run [42238367518](https://github.com/minhtrancmvn/tag-based-asset-manager/actions/runs/42238367518) (commit `64204c7`): **STORE-01 to STORE-10 all passed**, as reported by the account owner. The first install attempt failed until the certificate was imported into Local Machine → Trusted People (step 2). This is also the first native Windows run of the app; it covers the Store edition's packaged behaviour, not the GitHub NSIS installer.
 
 ## Before the first submission
 
@@ -63,6 +74,5 @@ Clean up afterwards: open `certlm.msc` → **Trusted People** → **Certificates
 
 ## Not verified yet
 
-- Any install, upgrade or uninstall on Windows (the STORE-01 to STORE-10 table).
 - Partner Center upload validation and certification.
 - WebView2 on older Windows 10 machines; Windows 11 includes it.
