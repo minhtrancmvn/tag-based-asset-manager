@@ -433,3 +433,5 @@ Verification:
 - Windows 11 x64, the account owner's PC: STORE-01 to STORE-10 all passed, as reported by the account owner. This is the first native Windows run of the app. It covered a fresh start, the Store update message, folder picker and scan, tagging with restart, open/reveal/copy, JSON export, Recycle Bin delete, in-place upgrade from `.0` to `.1`, side-by-side with the GitHub copy, and uninstall keeping library files.
 
 Not done: Partner Center upload and certification; the GitHub NSIS installer and the rest of the manual test plan on Windows; Windows 10.
+
+2026-11-08: the first Partner Center upload of `0.6.0.0` (Store package run 42420532367 on `eb420bc`) failed package acceptance: "The PublisherDisplayName element in the app manifest of Tag-Based-Asset-Manager_0.6.0.0_x64.msix is Minh Tran, which doesn't match your publisher display name: kaishj91." The name `Minh Tran` is taken in Partner Center, so the manifest now uses `kaishj91`, the account's publisher display name. The rebuilt `0.6.0.0` package (Store package run 42422444473 on PR #17) passed Partner Center's upload validation, as reported by the account owner. Certification is pending.
