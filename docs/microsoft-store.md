@@ -1,6 +1,6 @@
 # Microsoft Store edition
 
-Status (2026-11-08): the Store build and MSIX packaging exist, and the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10). The first Partner Center upload (`0.6.0.0`) failed validation on `PublisherDisplayName`, fixed below; nothing has been submitted for certification yet.
+Status (2026-11-08): the Store build and MSIX packaging exist, and the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10). The first Partner Center upload (`0.6.0.0`) failed validation on `PublisherDisplayName`, fixed below; the corrected `0.6.0.0` package passed Partner Center's upload validation on 2026-11-08. Certification has not finished yet.
 
 ## What differs from the GitHub download
 
@@ -74,5 +74,5 @@ Clean up afterwards: in PowerShell run as administrator, `Remove-Item Cert:\Loca
 
 ## Not verified yet
 
-- Partner Center upload validation and certification.
+- Microsoft certification and the published Store listing.
 - WebView2 on older Windows 10 machines; Windows 11 includes it.
