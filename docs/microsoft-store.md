@@ -1,6 +1,6 @@
 # Microsoft Store edition
 
-Status (2026-11-07): the Store build and MSIX packaging exist, and the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10). Nothing has been uploaded to Partner Center or submitted for certification yet.
+Status (2026-11-08): the Store build and MSIX packaging exist, and the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10). The first Partner Center upload (`0.6.0.0`) failed validation on `PublisherDisplayName`, fixed below; nothing has been submitted for certification yet.
 
 ## What differs from the GitHub download
 
@@ -17,7 +17,7 @@ How it works:
 
 - `TAG_ASSET_MANAGER_STORE_BUILD=1` at compile time makes `check_for_updates` and `install_update` in `src-tauri/src/app_updates.rs` refuse before contacting GitHub. The Store workflow also refuses to build if `TAURI_UPDATER_PUBLIC_KEY` is set.
 - `src-tauri/store/tauri.store.json` gives the Store build its own Tauri identifier, so its settings never mix with the GitHub copy's.
-- `src-tauri/store/AppxManifest.xml` holds the package identity from Partner Center. The `Publisher` value is confirmed: it derives the publisher ID `ae7ec8a4n9cgc` in the package family name `kaishj91.Tag-basedAssetManager_ae7ec8a4n9cgc`. `DisplayName` (`Tag-based Asset Manager`) and `PublisherDisplayName` (`Minh Tran`) match Partner Center → Product identity, as confirmed by the account owner on 2026-11-06.
+- `src-tauri/store/AppxManifest.xml` holds the package identity from Partner Center. The `Publisher` value is confirmed: it derives the publisher ID `ae7ec8a4n9cgc` in the package family name `kaishj91.Tag-basedAssetManager_ae7ec8a4n9cgc`. `DisplayName` (`Tag-based Asset Manager`) matches Partner Center → Product identity. `PublisherDisplayName` must equal the account's publisher display name, `kaishj91`, which the Store shows as the developer: the first upload with `Minh Tran` was rejected on 2026-11-08 ("doesn't match your publisher display name: kaishj91"), and renaming the account to `Minh Tran` was not possible because that name is taken.
 - The package is a full-trust desktop app (`runFullTrust`). It needs this to read and write library folders the user picks and to move items to the Recycle Bin.
 
 ## Building the packages
