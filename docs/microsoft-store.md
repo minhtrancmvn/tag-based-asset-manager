@@ -69,7 +69,8 @@ Clean up afterwards: in PowerShell run as administrator, `Remove-Item Cert:\Loca
 
 - Upload `store-msix-upload` in a new submission. Partner Center validates the identity on upload.
 - Restricted capability `runFullTrust`: Partner Center asks for a reason. Suggested text: "Desktop app that catalogs and tags files in folders the user chooses; it reads those folders, writes tag files next to them, and moves user-selected items to the Recycle Bin."
-- Store listing: description, at least one screenshot, age rating questionnaire, and a privacy policy URL if Partner Center asks for one. The app collects no personal data and, in the Store edition, makes no network requests of its own.
+- Store listing: description, at least one screenshot and the age rating questionnaire.
+- Privacy policy: Partner Center requires one because the package declares `runFullTrust`. The policy is [privacy-policy.md](privacy-policy.md); paste its text under **Provide privacy policy text**, or link to it on GitHub. The app collects no personal data and, in the Store edition, makes no network requests of its own.
 - Microsoft certification usually takes a few days.
 
 ## Not verified yet
