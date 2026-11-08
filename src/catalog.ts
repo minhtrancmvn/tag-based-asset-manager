@@ -116,6 +116,21 @@ export function parseQuery(input: string): CatalogQuery {
   return result;
 }
 
+/**
+ * Query after a tag is chosen as a filter: unchanged when the query already requires the tag, otherwise the tag is
+ * appended. An exclusion of the same tag is dropped rather than left beside it, since the pair could match nothing.
+ * Quoted path text is never treated as the tag.
+ */
+export function addRequiredTag(input: string, tag: string): string {
+  const value = tag.trim().toLowerCase();
+  if (!value) return input;
+  const tokens = tokenizeQuery(input);
+  if (tokens.some((token) => token.role === "required" && queryTokenTagValue(token) === value)) return input;
+  const kept = tokens.filter((token) => !(token.role === "excluded" && queryTokenTagValue(token) === value));
+  const base = kept.length === tokens.length ? input.trim() : kept.map((token) => token.text).join(" ");
+  return `${base} ${value}`.trim();
+}
+
 export function matchesAsset(asset: Asset, query: CatalogQuery, view: ViewKey, matchMode: TagMatchMode = "all", kind: KindFilter = "all"): boolean {
   if (kind !== "all" && asset.kind !== kind) return false;
   if (view === "untagged" && (asset.tags.length > 0 || asset.metadataState === "blocked")) return false;

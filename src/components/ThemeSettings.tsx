@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { Check } from "lucide-react";
 import type { AppTheme } from "../themes";
-import { themeAppearance, themeOptions } from "../themes";
+import { themeAppearance, themeOptions, themePalettes } from "../themes";
 
 interface ThemeSettingsProps {
   theme: AppTheme;
@@ -18,16 +19,50 @@ interface PopoverPosition {
 }
 
 const VIEWPORT_MARGIN = 8;
-const POPOVER_WIDTH = 480;
-const GRID_MIN_WIDTH = 78;
+const POPOVER_WIDTH = 640;
+const TILE_MIN_WIDTH = 72;
+const TILE_GAP = 8;
+const POPOVER_CHROME = 30;
+/** Seven columns hold the 14 light themes in two full rows and the 6 dark themes in one; narrower steps are fallbacks. */
+const COLUMN_STEPS = [7, 5, 4, 3] as const;
+
+/** Light themes first, then dark, each in preset order; the stored preset order is unchanged. */
+const themeGroups = (["light", "dark"] as const).map((mode) => ({
+  mode,
+  label: mode === "light" ? "Light" : "Dark",
+  options: themeOptions.filter((option) => themeAppearance[option.value].mode === mode),
+}));
+const orderedOptions = themeGroups.flatMap((group) => group.options);
+const groupStarts = themeGroups.map((_, index) => themeGroups.slice(0, index).reduce((total, group) => total + group.options.length, 0));
+
+function orderedIndexOf(theme: AppTheme): number {
+  return Math.max(0, orderedOptions.findIndex((option) => option.value === theme));
+}
+
+/** Option index one row up or down, moving between the light and dark grids at the same column where possible. */
+function verticalIndex(index: number, direction: 1 | -1, columns: number): number {
+  const group = index >= groupStarts[1] ? 1 : 0;
+  const size = themeGroups[group].options.length;
+  const offset = index - groupStarts[group];
+  const row = Math.floor(offset / columns);
+  const column = offset % columns;
+  const lastRow = Math.floor((size - 1) / columns);
+  if (direction === 1 && row < lastRow) return groupStarts[group] + Math.min(offset + columns, size - 1);
+  if (direction === -1 && row > 0) return index - columns;
+  const target = group + direction;
+  if (target < 0 || target >= themeGroups.length) return index;
+  const targetSize = themeGroups[target].options.length;
+  const targetRow = direction === 1 ? 0 : Math.floor((targetSize - 1) / columns);
+  return groupStarts[target] + Math.min(targetRow * columns + column, targetSize - 1);
+}
 const POPOVER_GAP = 8;
 const FALLBACK_POPOVER_HEIGHT = 260;
 
 function columnsForWidth(viewportWidth: number): number {
   const availableWidth = Math.min(POPOVER_WIDTH, viewportWidth - VIEWPORT_MARGIN * 2);
-  if (availableWidth >= GRID_MIN_WIDTH * 5 + 40) return 5;
-  if (availableWidth >= GRID_MIN_WIDTH * 4 + 40) return 4;
-  if (availableWidth >= GRID_MIN_WIDTH * 3 + 40) return 3;
+  for (const columns of COLUMN_STEPS) {
+    if (availableWidth >= columns * TILE_MIN_WIDTH + (columns - 1) * TILE_GAP + POPOVER_CHROME) return columns;
+  }
   return 2;
 }
 
@@ -55,8 +90,10 @@ function calculatePopoverPosition(
   return { left, top, maxHeight, columns: columnsForWidth(viewport.width) };
 }
 
-function gradient(stops: readonly string[]): string {
-  return `linear-gradient(135deg, ${stops.join(", ")})`;
+/** Flat preview of a theme: its frame, the sheet and the accent, painted by CSS from these three properties. */
+function swatchStyle(theme: AppTheme): CSSProperties {
+  const palette = themePalettes[theme];
+  return { "--swatch-frame": palette.floor, "--swatch-sheet": palette.paper, "--swatch-line": palette.line, "--swatch-accent": palette.accent } as CSSProperties;
 }
 
 export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeSettingsProps) {
@@ -68,7 +105,7 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
   const [open, setOpen] = useState(false);
   const [requestInFlight, setRequestInFlight] = useState(false);
   const [position, setPosition] = useState<PopoverPosition | null>(null);
-  const [focusedIndex, setFocusedIndex] = useState(() => Math.max(0, themeOptions.findIndex((option) => option.value === theme)));
+  const [focusedIndex, setFocusedIndex] = useState(() => orderedIndexOf(theme));
 
   const isBusy = disabled || saving || requestInFlight;
   const pendingTheme = requestInFlight ? requestedTheme.current : null;
@@ -140,7 +177,7 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
 
   useEffect(() => {
     if (!open) return;
-    const initialIndex = Math.max(0, themeOptions.findIndex((option) => option.value === theme));
+    const initialIndex = orderedIndexOf(theme);
     setFocusedIndex(initialIndex);
     optionRefs.current[initialIndex]?.focus();
   }, [open]);
@@ -156,7 +193,7 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
       return;
     }
     if (isBusy) return;
-    setFocusedIndex(Math.max(0, themeOptions.findIndex((option) => option.value === theme)));
+    setFocusedIndex(orderedIndexOf(theme));
     setPosition(null);
     setOpen(true);
   }
@@ -178,7 +215,7 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
   }
 
   function moveFocus(index: number): void {
-    const nextIndex = Math.min(themeOptions.length - 1, Math.max(0, index));
+    const nextIndex = Math.min(orderedOptions.length - 1, Math.max(0, index));
     setFocusedIndex(nextIndex);
     optionRefs.current[nextIndex]?.focus();
   }
@@ -200,16 +237,16 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
         nextIndex = index - 1;
         break;
       case "ArrowDown":
-        nextIndex = Math.min(themeOptions.length - 1, index + columns);
+        nextIndex = verticalIndex(index, 1, columns);
         break;
       case "ArrowUp":
-        nextIndex = Math.max(0, index - columns);
+        nextIndex = verticalIndex(index, -1, columns);
         break;
       case "Home":
         nextIndex = 0;
         break;
       case "End":
-        nextIndex = themeOptions.length - 1;
+        nextIndex = orderedOptions.length - 1;
         break;
       default:
         return;
@@ -224,9 +261,7 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
     setOpen(false);
   }
 
-  const triggerStyle = {
-    "--theme-swatch-gradient": gradient(selectedAppearance.swatchStops),
-  } as CSSProperties;
+  const triggerStyle = swatchStyle(theme);
 
   return (
     <div className="theme-settings">
@@ -291,12 +326,15 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
             <span>Choose color theme</span>
             <button type="button" className="theme-popover-close" aria-label="Close theme choices" onClick={closeAndRestoreTrigger}>×</button>
           </div>
-          <div className="theme-grid" role="group" aria-label="Color themes" data-columns={position?.columns ?? columnsForWidth(window.innerWidth)}>
-            {themeOptions.map((option, index) => {
+          <div className="theme-groups" role="group" aria-label="Color themes">
+            {themeGroups.map((group, groupIndex) => <div className="theme-group-section" key={group.mode}>
+            <div className="theme-group-label" id={`theme-group-${group.mode}`}>{group.label}</div>
+            <div className="theme-grid" role="group" aria-labelledby={`theme-group-${group.mode}`} data-columns={position?.columns ?? columnsForWidth(window.innerWidth)}>
+            {group.options.map((option, groupOffset) => {
+              const index = groupStarts[groupIndex] + groupOffset;
               const appearance = themeAppearance[option.value];
               const selected = option.value === theme;
               const pending = requestInFlight && pendingTheme === option.value;
-              const swatchStyle = { background: gradient(appearance.swatchStops) } as CSSProperties;
               return (
                 <button
                   key={option.value}
@@ -312,14 +350,15 @@ export function ThemeSettings({ theme, saving, disabled, onThemeChange }: ThemeS
                   onKeyDown={(event) => handleOptionKeyDown(event, index)}
                   onClick={() => { void handleThemeSelect(option.value); }}
                 >
-                  <span className="theme-option-swatch" aria-hidden="true" style={swatchStyle} />
+                  <span className="theme-option-swatch" aria-hidden="true" style={swatchStyle(option.value)} />
                   <span className="theme-option-name">{option.label}</span>
-                  <span className="theme-option-mode">{appearance.mode === "dark" ? "Dark" : "Light"}</span>
-                  {selected && <span className="theme-selected-indicator" aria-hidden="true">✓</span>}
+                  {selected && <span className="theme-selected-indicator" aria-hidden="true"><Check size={12} strokeWidth={3} /></span>}
                   {pending && <span className="theme-pending-indicator" aria-hidden="true">…</span>}
                 </button>
               );
             })}
+            </div>
+            </div>)}
           </div>
         </div>,
         document.body,

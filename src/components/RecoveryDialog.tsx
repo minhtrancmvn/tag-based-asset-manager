@@ -63,7 +63,7 @@ export function RecoveryDialog({ source, targets, busy, onCancel, onConfirm }: R
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
       <section ref={dialogRef} className="workflow-dialog recovery-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown}>
-        <div className="workflow-dialog-heading"><div><span className="dialog-eyebrow">MISSING ASSET RECOVERY</span><h2 id={titleId}>Reconnect metadata</h2></div><button className="icon-button" type="button" aria-label="Cancel reconnect" onClick={onCancel} disabled={disabled}><X size={17} /></button></div>
+        <div className="workflow-dialog-heading"><div><h2 id={titleId}>Reconnect metadata</h2></div><button className="icon-button" type="button" aria-label="Cancel reconnect" onClick={onCancel} disabled={disabled}><X size={17} /></button></div>
         <div className="recovery-source"><span>Missing entry</span><strong title={source.relativePath}>{source.relativePath}</strong><small>UUID · {source.metadataId}</small></div>
         {targets.length === 0 ? <p className="dialog-hint">No eligible existing files found in this folder. Nothing has changed.</p> : <label className="dialog-field">Existing file in same folder
           <select aria-label="Existing file in same folder" value={targetId} onChange={(event) => { setTargetId(event.target.value); setConfirming(false); setError(null); }} disabled={disabled || confirming}>

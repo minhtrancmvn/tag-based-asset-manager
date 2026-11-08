@@ -73,7 +73,7 @@ export function BulkTagDialog({ assets, availableTags, busy, onCancel, onConfirm
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
       <section ref={dialogRef} className="workflow-dialog bulk-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleDialogKeyDown}>
-        <div className="workflow-dialog-heading"><div><span className="dialog-eyebrow">BULK SIDECAR EDIT</span><h2 id={titleId}>Review tag changes</h2></div><button className="icon-button" type="button" aria-label="Cancel bulk edit" onClick={onCancel} disabled={busy}><X size={17} /></button></div>
+        <div className="workflow-dialog-heading"><div><h2 id={titleId}>Review tag changes</h2></div><button className="icon-button" type="button" aria-label="Cancel bulk edit" onClick={onCancel} disabled={busy}><X size={17} /></button></div>
         <form onSubmit={(event) => void submit(event)}>
           <p className="bulk-target-summary"><strong>{assets.length} selected assets</strong><span>Exact target snapshot is fixed until this dialog closes.</span></p>
           <label className="dialog-field">Add tags <input aria-label="Add tags" list={`${titleId}-add`} value={addValue} onChange={(event) => setAddValue(event.target.value)} onKeyDown={(event) => handleTagKeyDown(event, "add")} placeholder="Type tag and press Enter" disabled={busy} /></label>

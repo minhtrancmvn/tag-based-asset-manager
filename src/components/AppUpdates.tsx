@@ -226,6 +226,7 @@ export function AppUpdates({
       <button
         type="button"
         className="quiet-button app-updates-trigger"
+        data-available={isAvailable ? "" : undefined}
         onClick={handleTriggerClick}
         disabled={!enabled}
         aria-haspopup="dialog"
@@ -247,7 +248,6 @@ export function AppUpdates({
             >
               <div className="workflow-dialog-heading">
                 <div>
-                  <span className="dialog-eyebrow">APPLICATION UPDATE</span>
                   <h2 id={titleId}>
                     {installingState
                       ? "Installing update"

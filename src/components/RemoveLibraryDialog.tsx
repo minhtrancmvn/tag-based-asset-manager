@@ -38,7 +38,7 @@ export function RemoveLibraryDialog({ library, savedSearchCount, onCancel, onCon
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
       <section ref={dialogRef} className="workflow-dialog delete-dialog remove-library-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown}>
-        <div className="workflow-dialog-heading"><div><span className="dialog-eyebrow">REMOVE LIBRARY REGISTRATION</span><h2 id={titleId}>Remove “{library.name}” from this app?</h2></div><button className="icon-button" type="button" aria-label="Cancel library removal" onClick={onCancel}><X size={17} /></button></div>
+        <div className="workflow-dialog-heading"><div><h2 id={titleId}>Remove “{library.name}” from this app?</h2></div><button className="icon-button" type="button" aria-label="Cancel library removal" onClick={onCancel}><X size={17} /></button></div>
         <form aria-label="Remove library confirmation" onSubmit={(event) => { event.preventDefault(); onConfirm(); }}>
           <ul className="delete-target-list"><li><span title={library.rootPath}>{library.rootPath}</span></li></ul>
           <p className="bulk-warning">Files and folders will not be changed. {savedSearchCount > 0 ? `${savedSearchCount === 1 ? "Its saved search" : `Its ${savedSearchCount} saved searches`} will be deleted from this app.` : "This library has no saved searches."}</p>
