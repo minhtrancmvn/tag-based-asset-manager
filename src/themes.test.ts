@@ -6,11 +6,21 @@ const themes: readonly AppTheme[] = ["workshop", "coral", "lavender", "ocean", "
 const lightThemes: readonly AppTheme[] = ["workshop", "coral", "lavender", "ocean", "mint", "sunset", "stone", "rose", "peach", "amber", "meadow", "lagoon", "glacier", "sky"];
 const darkThemes: readonly AppTheme[] = ["midnight", "ember", "cobalt", "iris", "plum", "aurora"];
 const HEX_COLOR = /^#[\da-f]{6}$/i;
+type Role = Exclude<keyof ThemePalette, "label">;
+const roles = Object.keys(themePalettes.workshop).filter((key) => key !== "label") as Role[];
+const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
+
+function channels(hex: string): number[] {
+  return hex.slice(1).match(/../g)?.map((channel) => parseInt(channel, 16) / 255) ?? [];
+}
+
+function linear(value: number): number {
+  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
 
 function luminance(hex: string): number {
-  const channels = hex.slice(1).match(/../g)?.map((channel) => parseInt(channel, 16) / 255) ?? [];
-  const linear = channels.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * (linear[0] ?? 0) + 0.7152 * (linear[1] ?? 0) + 0.0722 * (linear[2] ?? 0);
+  const [r = 0, g = 0, b = 0] = channels(hex).map(linear);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 function contrast(foreground: string, background: string): number {
@@ -18,256 +28,141 @@ function contrast(foreground: string, background: string): number {
   return (high + 0.05) / (low + 0.05);
 }
 
-function assertText(palette: ThemePalette, foreground: keyof ThemePalette, background: keyof ThemePalette, ratio = 4.5): void {
-  const foregroundColor = palette[foreground];
-  const backgroundColor = palette[background];
-  expect(foregroundColor, `${palette.label}: ${foreground} must be opaque hex`).toMatch(HEX_COLOR);
-  expect(backgroundColor, `${palette.label}: ${background} must be opaque hex`).toMatch(HEX_COLOR);
-  const actualRatio = contrast(foregroundColor, backgroundColor);
-  expect(Number.isFinite(actualRatio), `${palette.label}: ${foreground} on ${background} must have finite contrast`).toBe(true);
-  expect(actualRatio, `${palette.label}: ${foreground} on ${background}`).toBeGreaterThanOrEqual(ratio);
+/** OKLCH chroma of an sRGB hex colour: how far it sits from grey. */
+function chroma(hex: string): number {
+  const [r = 0, g = 0, b = 0] = channels(hex).map(linear);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  return Math.hypot(a, bb);
 }
 
-function assertDecorativeColors(palette: ThemePalette, ...roles: (keyof ThemePalette)[]): void {
-  for (const role of roles) {
-    expect(palette[role], `${palette.label}: ${role} must be an opaque hex color`).toMatch(HEX_COLOR);
-  }
+function assertPair(palette: ThemePalette, foreground: Role, background: Role, ratio: number): void {
+  expect(contrast(palette[foreground], palette[background]), `${palette.label}: ${foreground} on ${background}`).toBeGreaterThanOrEqual(ratio);
 }
 
-function gradientStops(gradient: string): string[] {
-  const match = gradient.match(/^linear-gradient\(135deg,\s*(.+)\)$/);
-  expect(match, `Expected a 135-degree linear gradient, got ${gradient}`).not.toBeNull();
-  return match?.[1].split(",").map((stop) => stop.trim()) ?? [];
+function rule(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const body = css.match(new RegExp(`(?:^|\\n|\\}\\s*)${escaped}\\s*\\{([^}]+)\\}`))?.[1];
+  expect(body, `App.css rule ${selector}`).toBeDefined();
+  return body ?? "";
 }
 
 describe("theme palettes", () => {
-  it("applies each theme signature to primary action buttons without changing semantic alerts", () => {
-    const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
-    const primary = css.match(/\.primary-button\s*\{([^}]+)\}/)?.[1];
-    expect(primary).toBeDefined();
-    expect(primary).toContain("background: var(--theme-primary-gradient)");
-    expect(primary).toContain("color: var(--theme-primary-ink)");
-    expect(css).toContain("--theme-primary-gradient:");
-    for (const theme of themes) {
-      const variables = themeCssVariables(theme);
-      const stops = gradientStops(variables["--theme-primary-gradient"]);
-      expect(stops).toHaveLength(3);
-      expect(variables["--theme-primary-ink"]).toMatch(HEX_COLOR);
-      for (let segment = 0; segment < stops.length - 1; segment += 1) {
-        for (let step = 0; step <= 100; step += 1) {
-          expect(contrast(variables["--theme-primary-ink"], interpolateHex(stops[segment], stops[segment + 1], step / 100)), `${theme}: primary gradient text`).toBeGreaterThanOrEqual(4.5);
-        }
-      }
-    }
-    expect(css).toMatch(/\.attention-banner[^\n{]*\{[^}]*background: var\(--error-bg\)/);
-  });
-
-  it("retains bright primary signatures when dark text already passes contrast", () => {
-    for (const theme of ["coral", "lavender", "mint", "peach", "amber", "glacier", "sky"] as const) {
-      expect(themeAppearance[theme].primaryStops).toEqual(themeAppearance[theme].swatchStops);
-      expect(themeAppearance[theme].primaryInk).toBe("#101820");
-    }
-  });
-
-  it("clears primary gradients for disabled actions so disabled text retains contrast", () => {
-    const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
-    const disabledPrimary = css.match(/\.primary-button:disabled\s*\{([^}]+)\}/)?.[1];
-    expect(disabledPrimary).toBeDefined();
-    expect(disabledPrimary).toContain("background: var(--disabled-bg)");
-    expect(disabledPrimary).toContain("color: var(--disabled-ink)");
-  });
-
-  it("keeps a disabled search input inside its existing field surface", () => {
-    const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
-    const disabledSearch = css.match(/\.search-field input:disabled\s*\{([^}]+)\}/)?.[1];
-    expect(disabledSearch).toBeDefined();
-    expect(disabledSearch).toContain("background: transparent");
-    expect(disabledSearch).toContain("color: var(--muted)");
-  });
-
-  it("keeps disabled sidebar controls transparent over their existing surface", () => {
-    const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
-    const disabledSidebar = css.match(/\.sidebar button:disabled,\s*\.sidebar select:disabled\s*\{([^}]+)\}/)?.[1];
-    expect(disabledSidebar).toBeDefined();
-    expect(disabledSidebar).toMatch(/background(?:-color)?:\s*transparent/);
-    expect(disabledSidebar).not.toMatch(/background(?:-color)?:\s*var\(--(?:sidebar|disabled-bg)\)/);
-  });
-
-  it("keeps sidebar texture from drawing false menu separators", () => {
-    const css = readFileSync(new URL("./App.css", import.meta.url), "utf8");
-    const sidebar = css.match(/\.sidebar\s*\{([^}]+)\}/)?.[1];
-    expect(sidebar).toBeDefined();
-    expect(sidebar).not.toContain("repeating-linear-gradient");
-    expect(sidebar).toContain("border-right: 1px solid var(--sidebar-border)");
-  });
-
   it("defines exactly twenty options with matching palettes and expected mode counts", () => {
     expect(themeOptions.map(({ value }) => value)).toEqual(themes);
     expect(Object.keys(themePalettes).sort()).toEqual([...themes].sort());
+    expect(Object.keys(themeAppearance).sort()).toEqual([...themes].sort());
     expect(lightThemes).toHaveLength(14);
     expect(darkThemes).toHaveLength(6);
-    expect(new Set([...lightThemes, ...darkThemes])).toEqual(new Set(themes));
-    expect([...lightThemes, ...darkThemes]).toHaveLength(themes.length);
+    for (const theme of themes) expect(themeAppearance[theme].mode, theme).toBe(darkThemes.includes(theme) ? "dark" : "light");
+    for (const { value, label } of themeOptions) expect(themePalettes[value].label).toBe(label);
   });
 
   it("matches every complete palette to the approved palette artifact", () => {
-    const approvedPalettes: unknown = JSON.parse(readFileSync(new URL("../docs/design/gradient-theme-palettes.json", import.meta.url), "utf8"));
-    if (!Array.isArray(approvedPalettes)) throw new Error("Approved theme palette artifact must contain an array.");
-    const approvedThemes = approvedPalettes as { id: AppTheme; palette: ThemePalette }[];
+    const approved: unknown = JSON.parse(readFileSync(new URL("../docs/design/theme-palettes.json", import.meta.url), "utf8"));
+    if (!Array.isArray(approved)) throw new Error("Approved theme palette artifact must contain an array.");
+    const approvedThemes = approved as { id: AppTheme; mode: string; palette: ThemePalette }[];
     expect(approvedThemes.map(({ id }) => id)).toEqual(themes);
-    for (const { id, palette } of approvedThemes) {
+    for (const { id, mode, palette } of approvedThemes) {
       expect(themePalettes[id], `${id} palette must match approved artifact`).toEqual(palette);
+      expect(themeAppearance[id].mode).toBe(mode);
     }
   });
 
-  it("exposes appearance mode and gradient stops from the single theme appearance source", () => {
-    const appearances = themeAppearance as Record<AppTheme, { mode: string; swatchStops: readonly string[]; sidebarStops: readonly string[] }>;
-    expect(Object.keys(appearances).sort()).toEqual([...themes].sort());
+  it("keeps every colour role an opaque hex value", () => {
     for (const theme of themes) {
-      const appearance = appearances[theme];
-      expect(appearance.mode, `${theme} mode`).toBe(darkThemes.includes(theme) ? "dark" : "light");
-      expect(appearance.swatchStops, `${theme} swatch stop count`).toHaveLength(3);
-      expect(appearance.sidebarStops, `${theme} sidebar stop count`).toHaveLength(3);
-      for (const stop of [...appearance.swatchStops, ...appearance.sidebarStops]) {
-        expect(stop, `${theme} gradient stop`).toMatch(HEX_COLOR);
-      }
+      for (const role of roles) expect(themePalettes[theme][role], `${theme}: ${role}`).toMatch(HEX_COLOR);
     }
   });
 
-  it("uses saturated sidebar signatures and coordinated active surfaces", () => {
-    function saturation(hex: string): number {
-      const channels = hex.slice(1).match(/../g)?.map((value) => parseInt(value, 16)) ?? [];
-      const maximum = Math.max(...channels);
-      return maximum === 0 ? 0 : (maximum - Math.min(...channels)) / maximum;
-    }
-    for (const theme of themes) {
-      const minimum = theme === "stone" ? 0.18 : 0.5;
-      for (const stop of themeAppearance[theme].sidebarStops) {
-        expect(saturation(stop), `${theme}: sidebar saturation`).toBeGreaterThanOrEqual(minimum);
-      }
-      expect(saturation(themePalettes[theme].sidebarActive), `${theme}: active sidebar saturation`).toBeGreaterThanOrEqual(minimum);
-      expect(themePalettes[theme].sidebar).toBe(themeAppearance[theme].sidebarStops[0]);
-    }
-  });
-
-  it("keeps sidebar gradient colors readable behind sidebar text", () => {
+  it("keeps the frame and sheet quiet so the accent carries the theme", () => {
     for (const theme of themes) {
       const palette = themePalettes[theme];
-      const stops = themeAppearance[theme].sidebarStops;
-      const samples: string[] = [];
-      for (let segment = 0; segment < stops.length - 1; segment += 1) {
-        for (let step = 0; step <= 100; step += 1) {
-          samples.push(interpolateHex(stops[segment], stops[segment + 1], step / 100));
-        }
+      for (const role of ["floor", "paper", "panel", "raised", "active", "rowHover", "input", "line"] as const) {
+        expect(chroma(palette[role]), `${theme}: ${role} chroma`).toBeLessThanOrEqual(0.03);
       }
-      for (const color of samples) {
-        for (const foreground of ["sidebarText", "sidebarMuted"] as const) {
-          const ratio = contrast(palette[foreground], color);
-          expect(Number.isFinite(ratio), `${theme}: ${foreground} on ${color} must have finite contrast`).toBe(true);
-          expect(ratio, `${theme}: ${foreground} on sidebar gradient ${color}`).toBeGreaterThanOrEqual(4.5);
-        }
-      }
+      // Elevation by lightness: the sheet is lighter than the frame in both modes.
+      expect(luminance(palette.paper), `${theme}: sheet lighter than frame`).toBeGreaterThan(luminance(palette.floor));
+      expect(chroma(palette.accent), `${theme}: accent carries the hue`).toBeGreaterThan(chroma(palette.floor));
     }
   });
 
-  it("keeps all text-role pairs readable across base and elevated surfaces", () => {
+  it("keeps all running text readable on every surface it sits on", () => {
+    const surfaces: Role[] = ["floor", "paper", "panel", "raised", "active", "rowHover", "selection", "accentSoft", "input"];
     for (const theme of themes) {
       const palette = themePalettes[theme];
-      for (const surface of ["paper", "floor", "panel", "raised"] as const) assertText(palette, "ink", surface);
-      for (const surface of ["paper", "panel", "tableHeader", "rowHover", "selection", "accentSoft"] as const) assertText(palette, "muted", surface);
-      assertText(palette, "ink", "accentSoft");
-      assertText(palette, "ink", "input");
-    }
-  });
-
-  it("keeps selection, tag, error, success, disabled, and accent text readable", () => {
-    for (const theme of themes) {
-      const palette = themePalettes[theme];
-      assertText(palette, "selectionInk", "selection");
-      assertText(palette, "sidebarText", "sidebar");
-      assertText(palette, "sidebarMuted", "sidebar");
-      assertText(palette, "sidebarText", "sidebarActive");
-      assertText(palette, "sidebarMuted", "sidebarActive");
-      assertText(palette, "tagInk", "tag");
-      assertText(palette, "errorInk", "error");
-      assertText(palette, "errorInk", "paper");
-      assertText(palette, "successInk", "success");
-      assertText(palette, "successInk", "paper");
-      assertText(palette, "disabledInk", "disabled");
-      assertText(palette, "accentInk", "accent");
-    }
-  });
-
-  it("keeps focus rings distinguishable on paper and selected surfaces", () => {
-    for (const theme of themes) {
-      const palette = themePalettes[theme];
-      assertText(palette, "focus", "paper", 3);
-      assertText(palette, "focus", "selection", 3);
-      assertText(palette, "focus", "accentSoft", 3);
-      assertText(palette, "accent", "paper", 3);
-      assertText(palette, "accent", "selection", 3);
-      assertText(palette, "selection", "paper", 1.15);
-    }
-  });
-
-  it("keeps every palette color token valid and every contrast calculation finite", () => {
-    for (const theme of themes) {
-      const palette = themePalettes[theme];
-      for (const [role, color] of Object.entries(palette)) {
-        if (role !== "label") expect(color, `${theme}: ${role}`).toMatch(HEX_COLOR);
+      for (const surface of surfaces) {
+        assertPair(palette, "ink", surface, 7);
+        assertPair(palette, "muted", surface, 4.5);
       }
-      for (const foreground of ["ink", "muted", "sidebarText", "sidebarMuted", "selectionInk", "tagInk", "errorInk", "successInk", "disabledInk", "accentInk", "focus"] as const) {
-        for (const background of ["floor", "paper", "panel", "raised", "accentSoft", "sidebar", "sidebarActive", "tableHeader", "rowHover", "selection", "tag", "error", "success", "input", "disabled", "accent"] as const) {
-          expect(Number.isFinite(contrast(palette[foreground], palette[background])), `${theme}: ${foreground} on ${background}`).toBe(true);
-        }
-      }
-      assertDecorativeColors(palette, "line", "sidebarBorder", "errorLine", "gradient");
+      assertPair(palette, "selectionInk", "selection", 4.5);
+      assertPair(palette, "tagInk", "tag", 4.5);
+      assertPair(palette, "tagInk", "paper", 4.5);
+      for (const surface of ["error", "paper", "floor", "raised"] as const) assertPair(palette, "errorInk", surface, 4.5);
+      for (const surface of ["success", "paper", "floor"] as const) assertPair(palette, "successInk", surface, 4.5);
+      assertPair(palette, "disabledInk", "disabled", 4.5);
+      assertPair(palette, "accentInk", "accent", 4.5);
+    }
+  });
+
+  it("keeps bullets, markers, focus rings and control edges at 3:1 against their surfaces", () => {
+    for (const theme of themes) {
+      const palette = themePalettes[theme];
+      // Group bullets sit on the frame and the active pill; the selection marker sits beside selected rows.
+      for (const surface of ["floor", "active", "paper", "selection", "accentSoft"] as const) assertPair(palette, "accent", surface, 3);
+      for (const surface of ["floor", "paper", "selection", "accentSoft"] as const) assertPair(palette, "focus", surface, 3);
+      // The ready dot and the local-files dot use the success ink on the sheet, rows and frame.
+      for (const surface of ["paper", "rowHover", "selection", "floor"] as const) assertPair(palette, "successInk", surface, 3);
+      for (const surface of ["paper", "floor", "input", "raised"] as const) assertPair(palette, "control", surface, 3);
+      assertPair(palette, "errorLine", "paper", 3);
+      expect(contrast(palette.selection, palette.paper), `${theme}: selection distinct from sheet`).toBeGreaterThanOrEqual(1.15);
     }
   });
 
   it("exports complete theme variables for document-level portal inheritance", () => {
+    const names: Partial<Record<Role, string>> = { tag: "--tag-bg", error: "--error-bg", success: "--success-bg", input: "--input-bg", disabled: "--disabled-bg" };
     for (const theme of themes) {
       const variables = themeCssVariables(theme);
       const palette = themePalettes[theme];
-      expect(variables["--floor"]).toBe(palette.floor);
-      expect(variables["--paper"]).toBe(palette.paper);
-      expect(variables["--panel"]).toBe(palette.panel);
-      expect(variables["--raised"]).toBe(palette.raised);
-      expect(variables["--ink"]).toBe(palette.ink);
-      expect(variables["--muted"]).toBe(palette.muted);
-      expect(variables["--input-bg"]).toBe(palette.input);
-      expect(variables["--selection"]).toBe(palette.selection);
-      expect(variables["--selection-ink"]).toBe(palette.selectionInk);
-      expect(variables["--focus"]).toBe(palette.focus);
-      expect(variables["--accent-soft"]).toBe(palette.accentSoft);
-      expect(variables["--sidebar-text"]).toBe(palette.sidebarText);
-      expect(variables["--sidebar-muted"]).toBe(palette.sidebarMuted);
-      expect(variables["--sidebar"]).toBe(palette.sidebar);
-      expect(variables["--sidebar-active"]).toBe(palette.sidebarActive);
-      expect(variables["--table-header"]).toBe(palette.tableHeader);
-      expect(variables["--row-hover"]).toBe(palette.rowHover);
-      expect(variables["--tag-bg"]).toBe(palette.tag);
-      expect(variables["--tag-ink"]).toBe(palette.tagInk);
-      expect(variables["--error-bg"]).toBe(palette.error);
-      expect(variables["--error-ink"]).toBe(palette.errorInk);
-      expect(variables["--success-bg"]).toBe(palette.success);
-      expect(variables["--success-ink"]).toBe(palette.successInk);
-      expect(variables["--disabled-bg"]).toBe(palette.disabled);
-      expect(variables["--disabled-ink"]).toBe(palette.disabledInk);
-      expect(variables["--accent"]).toBe(palette.accent);
-      expect(variables["--accent-ink"]).toBe(palette.accentInk);
-      expect(variables["--theme-gradient"]).toBe(palette.gradient);
-      expect(variables["--copper"]).toBe(palette.focus);
+      for (const role of roles) {
+        const name = names[role] ?? `--${role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+        expect(variables[name as `--${string}`], `${theme}: ${name}`).toBe(palette[role]);
+        expect(css, `App.css declares a default for ${name}`).toContain(`${name}:`);
+      }
       expect(variables["--theme-mode"]).toBe(themeAppearance[theme].mode);
-      expect(gradientStops(variables["--theme-swatch-gradient"])).toEqual(themeAppearance[theme].swatchStops);
-      expect(gradientStops(variables["--sidebar-gradient"])).toEqual(themeAppearance[theme].sidebarStops);
     }
   });
 });
 
-function interpolateHex(start: string, end: string, amount: number): string {
-  const startChannels = start.slice(1).match(/../g)?.map((channel) => parseInt(channel, 16)) ?? [];
-  const endChannels = end.slice(1).match(/../g)?.map((channel) => parseInt(channel, 16)) ?? [];
-  const interpolated = startChannels.map((value, index) => Math.round(value + ((endChannels[index] ?? value) - value) * amount));
-  return `#${interpolated.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
-}
+describe("theme styling", () => {
+  it("paints no gradients anywhere in the app", () => {
+    expect(css).not.toMatch(/(?:linear|radial|conic)-gradient/);
+    expect(readFileSync(new URL("./components/ThemeSettings.tsx", import.meta.url), "utf8")).not.toMatch(/gradient/i);
+  });
+
+  it("fills the primary action with the flat accent and clears it when disabled", () => {
+    const primary = rule(".primary-button");
+    expect(primary).toContain("background: var(--accent)");
+    expect(primary).toContain("color: var(--accent-ink)");
+    const disabled = rule(".primary-button:disabled");
+    expect(disabled).toContain("background: var(--disabled-bg)");
+    expect(disabled).toContain("color: var(--disabled-ink)");
+    expect(css).toMatch(/\.attention-banner[^{]*\{[^}]*background: var\(--error-bg\)/);
+  });
+
+  it("draws bullets and status dots in tested colours, never in the surface colour", () => {
+    expect(rule(".group-swatch")).toContain("background: var(--accent)");
+    expect(rule(".status-dot")).toContain("background: var(--success-ink)");
+    expect(rule(".offline-dot")).toContain("background: var(--success-ink)");
+    expect(css).not.toMatch(/(?:dot|swatch)[^{]*\{[^}]*background: var\(--(?:paper|floor|panel)\)/);
+  });
+
+  it("keeps a disabled search input inside its existing field surface", () => {
+    const disabledSearch = rule(".search-field input:disabled");
+    expect(disabledSearch).toContain("background: transparent");
+    expect(disabledSearch).toContain("color: var(--muted)");
+  });
+});

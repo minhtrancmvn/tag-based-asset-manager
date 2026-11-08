@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppTheme } from "../themes";
-import { themeOptions } from "../themes";
+import { themeAppearance, themeOptions } from "../themes";
 import { ThemeSettings } from "./ThemeSettings";
 
 afterEach(() => {
@@ -73,12 +73,17 @@ describe("ThemeSettings", () => {
     expectAttribute(trigger, "aria-expanded", "true");
     const choices = within(dialog).getAllByRole("button").filter((choice) => choice.classList.contains("theme-option"));
     expect(choices).toHaveLength(20);
-    expect(choices.map((choice) => choice.querySelector(".theme-option-name")?.textContent)).toEqual(
-      themeOptions.map(({ label }) => label),
-    );
-    expectAttribute(dialog.querySelector(".theme-grid") as Element, "data-columns", "5");
-    expect(within(dialog).getAllByText("Light", { exact: true })).toHaveLength(14);
-    expect(within(dialog).getAllByText("Dark", { exact: true })).toHaveLength(6);
+    // Light themes are listed together ahead of dark ones, each group in preset order.
+    const light = themeOptions.filter(({ value }) => themeAppearance[value].mode === "light").map(({ label }) => label);
+    const dark = themeOptions.filter(({ value }) => themeAppearance[value].mode === "dark").map(({ label }) => label);
+    expect(choices.map((choice) => choice.querySelector(".theme-option-name")?.textContent)).toEqual([...light, ...dark]);
+    expect(light).toHaveLength(14);
+    expect(dark).toHaveLength(6);
+    const lightGroup = within(dialog).getByRole("group", { name: "Light" });
+    const darkGroup = within(dialog).getByRole("group", { name: "Dark" });
+    expect(within(lightGroup).getAllByRole("button").map((choice) => choice.getAttribute("aria-label"))).toEqual(light.map((label) => `${label}, light`));
+    expect(within(darkGroup).getAllByRole("button").map((choice) => choice.getAttribute("aria-label"))).toEqual(dark.map((label) => `${label}, dark`));
+    for (const grid of dialog.querySelectorAll(".theme-grid")) expectAttribute(grid, "data-columns", "7");
     expectAttribute(option(dialog, "workshop"), "aria-pressed", "true");
     expectAttribute(option(dialog, "ocean"), "aria-pressed", "false");
     expectPresent(option(dialog, "workshop").querySelector(".theme-selected-indicator"));
@@ -99,6 +104,26 @@ describe("ThemeSettings", () => {
     fireEvent.keyDown(option(screen.getByRole("dialog"), "aurora"), { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expectFocused(trigger);
+  });
+
+  it("moves by rows within each group and between the light and dark grids", () => {
+    const { trigger } = setup();
+    const dialog = openPicker(trigger);
+    const press = (from: AppTheme, key: string) => fireEvent.keyDown(option(dialog, from), { key });
+    press("workshop", "ArrowDown");
+    expectFocused(option(dialog, "rose"));
+    press("rose", "ArrowDown");
+    expectFocused(option(dialog, "midnight"));
+    press("midnight", "ArrowUp");
+    expectFocused(option(dialog, "rose"));
+    press("sky", "ArrowDown");
+    expectFocused(option(dialog, "aurora"));
+    press("sky", "ArrowRight");
+    expectFocused(option(dialog, "midnight"));
+    press("aurora", "ArrowDown");
+    expectFocused(option(dialog, "aurora"));
+    press("workshop", "ArrowUp");
+    expectFocused(option(dialog, "workshop"));
   });
 
   it("uses column-aware arrow navigation for narrower grids", () => {
@@ -293,10 +318,10 @@ describe("ThemeSettings", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 820 });
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
     const dialog = openPicker(trigger);
-    expect(dialog.style.left).toBe("332px");
+    expect(dialog.style.left).toBe("172px");
     expect(dialog.style.top).toBe("282px");
     expect(dialog.style.maxHeight).toBe("584px");
-    expectAttribute(dialog.querySelector(".theme-grid") as Element, "data-columns", "5");
+    expectAttribute(dialog.querySelector(".theme-grid") as Element, "data-columns", "7");
   });
 
   it("keeps native saving and disabling states visible without losing trigger label", () => {

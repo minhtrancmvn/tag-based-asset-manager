@@ -103,7 +103,7 @@ export function SavedSearchDialog({ filters, searches, busy, onCancel, onSave, o
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
       <section ref={dialogRef} className="workflow-dialog saved-search-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleDialogKeyDown}>
-        <div className="workflow-dialog-heading"><div><span className="dialog-eyebrow">APP-LOCAL FILTERS</span><h2 id={titleId}>Saved searches</h2></div><button className="icon-button" type="button" aria-label="Close saved searches" onClick={onCancel} disabled={busy}><X size={17} /></button></div>
+        <div className="workflow-dialog-heading"><div><h2 id={titleId}>Saved searches</h2><p className="dialog-subtitle">Saved in this app, not in the library folder.</p></div><button className="icon-button" type="button" aria-label="Close saved searches" onClick={onCancel} disabled={busy}><X size={17} /></button></div>
         <form onSubmit={(event) => void submit(event)}>
           {searches.length > 0 && <label className="dialog-field">Existing search<select aria-label="Existing saved search" value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setError(null); }} disabled={busy || confirmingDelete}><option value="">Create new search</option>{searches.map((search) => <option key={search.id} value={search.id}>{search.name}</option>)}</select></label>}
           <label className="dialog-field">Search name<input aria-label="Search name" autoFocus value={name} onChange={(event) => { setName(event.target.value); setError(null); }} maxLength={100} placeholder="e.g. Untagged miniatures" disabled={busy || confirmingDelete} /></label>

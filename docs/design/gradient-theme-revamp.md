@@ -1,5 +1,7 @@
 # Design: Gradient theme revamp
 
+> **Superseded 2026-11-08** by [clean-theme-refresh.md](clean-theme-refresh.md): gradients removed, palettes regenerated as flat single-hue themes. Theme IDs and picker behaviour below still apply.
+
 **Status:** Design approved by user on 2026-10-09; all twenty palettes implemented and locally validated in isolated feature worktree. Native macOS matrix passed within documented scope; Tab focus destination and Windows native UI remain unverified. User authorized PR-based preparation and publication of unsigned prerelease v0.2.0; no stable release or signing.
 
 ## Problem statement

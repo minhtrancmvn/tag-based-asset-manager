@@ -6,6 +6,7 @@ import * as appUpdatesModule from "./appUpdates";
 import { DEVELOPMENT_VERSION, getAppVersion } from "./appVersion";
 import { useLibrary } from "./useLibrary";
 import { deriveRenameMigration } from "./tagRename";
+import { themePalettes } from "./themes";
 import type { RenameMigration } from "./tagRename";
 import type { Asset, LibraryState, LibrarySummary, RenameApplyResult, RenameMapping, RenamePreview, RenameSkippedRow, RenameTargetSummary, SavedSearch, ScanIssue } from "./types";
 
@@ -261,8 +262,8 @@ describe("scanned library UI", () => {
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe('"Gear"');
     expect(assetRows()[0].getAttribute("aria-selected")).toBe("true");
     expect(document.documentElement.dataset.theme).toBe("aurora");
-    expect(document.documentElement.style.getPropertyValue("--floor")).toBe("#172028");
-    expect(document.documentElement.style.getPropertyValue("--paper")).toBe("#1F2F36");
+    expect(document.documentElement.style.getPropertyValue("--floor")).toBe(themePalettes.aurora.floor);
+    expect(document.documentElement.style.getPropertyValue("--paper")).toBe(themePalettes.aurora.paper);
     expect(document.documentElement.style.getPropertyValue("--theme-mode")).toBe("dark");
     expect(dialog.parentElement).toBe(document.body);
     expect(screen.getByRole("dialog", { name: "Color theme choices" })).toBe(dialog);
@@ -452,7 +453,7 @@ describe("scanned library UI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Untagged/ }));
     chooseFilter("Asset kind", "Files");
-    fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
     fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Path" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
@@ -460,8 +461,8 @@ describe("scanned library UI", () => {
     const scroll = screen.getByRole("table").parentElement!;
     fireEvent.scroll(scroll, { target: { scrollTop: 1200 } });
     expect(scroll.scrollTop).toBe(1200);
-    expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
-    expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: /^Name/ }).getAttribute("aria-sort")).toBe("descending");
+    expect(screen.queryByRole("columnheader", { name: "Path" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Color theme" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Color theme choices" })).getByRole("button", { name: "Aurora, dark" }));
@@ -471,8 +472,8 @@ describe("scanned library UI", () => {
 
     expect(screen.getByRole("heading", { name: "Untagged" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Asset kind" }).textContent).toBe("Files");
-    expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
-    expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: /^Name/ }).getAttribute("aria-sort")).toBe("descending");
+    expect(screen.queryByRole("columnheader", { name: "Path" })).toBeNull();
     expect(scroll.scrollTop).toBe(1200);
     expect(assetRows().length).toBeLessThan(80);
   });
@@ -487,7 +488,7 @@ describe("scanned library UI", () => {
     rerender(<App />);
     expect(within(screen.getByRole("table")).getByText(catalog[499].name, { selector: ".name-content span" })).toBeTruthy();
     expect(scroll.scrollTop).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
     expect(scroll.scrollTop).toBe(0);
   });
 
@@ -536,9 +537,9 @@ describe("scanned library UI", () => {
     expect(screen.getAllByText(library.rootPath)).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Local app; no account needed" })).toBeNull();
     const summary = screen.getByLabelText("Library summary");
-    expect(within(summary).getByText("ASSETS")).toBeTruthy();
-    expect(within(summary).getByText("LAST SCAN")).toBeTruthy();
-    expect(within(summary).queryByText("LIBRARY")).toBeNull();
+    expect(within(summary).getByText("items in this folder", { exact: false })).toBeTruthy();
+    expect(within(summary).getByText("Last scan")).toBeTruthy();
+    expect(within(summary).queryByText("Library")).toBeNull();
     expect(within(summary).queryByText("LOCATION")).toBeNull();
   });
 
@@ -819,7 +820,9 @@ describe("scanned library UI", () => {
     setLibraryResult({ assets: [tagged, different] });
     render(<App />);
     const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
-    expect([...sidebar.querySelectorAll(".group-label")].map((label) => label.textContent)).toEqual(["favorite", "material", "oole", "other"]);
+    // A plain tag that would only repeat its own name as a heading lists flat, ahead of the prefix groups.
+    expect([...sidebar.querySelectorAll(".group-label")].map((label) => label.textContent)).toEqual(["material", "oole", "other"]);
+    expect([...sidebar.querySelectorAll(".tag-group-plain .tag-nav")].map((button) => button.textContent)).toEqual(["favorite1"]);
     expect(within(sidebar).queryByText("Other")).toBeNull();
     expect(within(sidebar).getByRole("button", { name: "favorite1" })).toBeTruthy();
     expect(within(sidebar).getByRole("button", { name: "pla1" })).toBeTruthy();
@@ -832,6 +835,20 @@ describe("scanned library UI", () => {
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" }).value).toBe("oole:identity");
     expect(assetRows()).toHaveLength(1);
     expect(assetRows()[0].getAttribute("data-asset-id")).toBe(tagged.id);
+  });
+  it("adds a clicked tag to the search once, even when two clicks land before a render", () => {
+    setLibraryResult({ assets: [{ ...assets[0], tags: ["favorite"], status: "ready" }] });
+    render(<App />);
+    const sidebar = screen.getByRole("complementary", { name: "Library navigation" });
+    const search = screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" });
+    const favorite = within(sidebar).getByRole("button", { name: "favorite1" });
+    act(() => { favorite.click(); favorite.click(); });
+    expect(search.value).toBe("favorite");
+    fireEvent.click(favorite);
+    expect(search.value).toBe("favorite");
+    fireEvent.change(search, { target: { value: "-favorite" } });
+    fireEvent.click(favorite);
+    expect(search.value).toBe("favorite");
   });
   it("updates prefix groups for the current folder and live tag changes", () => {
     const folder: Asset = { ...assets[1], tags: ["category:model"] };
@@ -1362,9 +1379,9 @@ describe("scanned library UI", () => {
     expect(screen.getByText(/2 rows selected/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Path" }));
-    expect(screen.queryByRole("columnheader", { name: "PATH" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
-    expect(screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort")).toBe("descending");
+    expect(screen.queryByRole("columnheader", { name: "Path" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    expect(screen.getByRole("columnheader", { name: /^Name/ }).getAttribute("aria-sort")).toBe("descending");
   });
 
   describe("in-app updates integration", () => {
@@ -1810,7 +1827,7 @@ describe("tag rename menus", () => {
     setLibraryResult({ assets: [{ ...taggedAsset, tags: ["status", "status:printed", "oole:identity"] }] });
     rerender(<App />);
     fireEvent.keyDown(document, { key: "Escape" });
-    const header = within(sidebar()).getByText("TAGS", { selector: ".nav-section-label" });
+    const header = within(sidebar()).getByText("Tags", { selector: ".nav-section-label" });
     expect(header.getAttribute("tabindex")).toBe("-1");
     expect(document.activeElement).toBe(header);
   });
@@ -2134,20 +2151,20 @@ describe("tag rename integration", () => {
     it("keeps selection, folder, sort and column layout through preview and apply", async () => {
       const { rerender } = render(<App />);
       fireEvent.doubleClick(within(screen.getByRole("table")).getByText("Models", { selector: ".folder-name" }));
-      fireEvent.click(screen.getByRole("button", { name: /^NAME/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
       fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
       fireEvent.click(screen.getByRole("checkbox", { name: "Path" }));
       fireEvent.click(screen.getByRole("button", { name: "Choose visible columns" }));
-      fireEvent.mouseDown(screen.getByRole("separator", { name: "Resize NAME column" }), { clientX: 100 });
+      fireEvent.mouseDown(screen.getByRole("separator", { name: "Resize Name column" }), { clientX: 100 });
       fireEvent.mouseMove(window, { clientX: 160 });
       fireEvent.mouseUp(window);
       const dragon = () => assetRows().find((row) => row.textContent?.includes("Dragon.stl"))!;
       fireEvent.click(dragon());
       const snapshot = () => ({
         folder: screen.getByRole("navigation", { name: "Folder path" }).textContent,
-        sort: screen.getByRole("columnheader", { name: /^NAME/ }).getAttribute("aria-sort"),
-        path: screen.queryByRole("columnheader", { name: "PATH" }),
-        width: (screen.getByRole("columnheader", { name: /^NAME/ }) as HTMLElement).style.width,
+        sort: screen.getByRole("columnheader", { name: /^Name/ }).getAttribute("aria-sort"),
+        path: screen.queryByRole("columnheader", { name: "Path" }),
+        width: (screen.getByRole("columnheader", { name: /^Name/ }) as HTMLElement).style.width,
         selected: dragon().getAttribute("aria-selected"),
         order: assetRows().map((row) => row.getAttribute("title")),
       });
@@ -2590,7 +2607,7 @@ describe("tag rename integration", () => {
       setLibraryResult({ assets: catalog.map((asset) => ({ ...asset, tags: asset.tags.map((tag) => tag === "favorite" ? "starred" : tag) })) });
       rerender(<App />);
       await act(async () => { fireEvent.click(within(renameDialog()).getByRole("button", { name: "Close" })); });
-      const header = within(sidebar()).getByText("TAGS", { selector: ".nav-section-label" });
+      const header = within(sidebar()).getByText("Tags", { selector: ".nav-section-label" });
       expect(document.activeElement).toBe(header);
     });
   });

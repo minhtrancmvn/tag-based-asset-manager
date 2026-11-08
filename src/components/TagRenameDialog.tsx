@@ -430,7 +430,7 @@ export function TagRenameDialog({
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
       <section ref={dialogRef} className="workflow-dialog rename-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleDialogKeyDown}>
         <div className="workflow-dialog-heading">
-          <div><span className="dialog-eyebrow">TAG RENAME</span><h2 id={titleId}>{mode === "prefix" ? "Rename prefix group" : "Rename tag"}</h2></div>
+          <div><h2 id={titleId}>{mode === "prefix" ? "Rename prefix group" : "Rename tag"}</h2></div>
           <button className="icon-button" type="button" aria-label="Close rename dialog" onClick={onClose} disabled={busy}><X size={17} /></button>
         </div>
         <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>

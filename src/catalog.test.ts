@@ -1,9 +1,29 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { formatSize, matchesAsset, parseQuery, sortAssets, tagGroup, tokenizeQuery } from "./catalog";
+import { addRequiredTag, formatSize, matchesAsset, parseQuery, sortAssets, tagGroup, tokenizeQuery } from "./catalog";
 import type { CatalogQuery, QueryToken } from "./catalog";
 import { mockAssets } from "./data/mockAssets";
+
+describe("adding a tag filter", () => {
+  it("appends a tag the query does not yet require", () => {
+    expect(addRequiredTag("", "favorite")).toBe("favorite");
+    expect(addRequiredTag("  category:animal  ", "favorite")).toBe("category:animal favorite");
+  });
+  it("leaves the query unchanged when it already requires the tag, in any case", () => {
+    expect(addRequiredTag("favorite", "favorite")).toBe("favorite");
+    expect(addRequiredTag("Favorite status:printed", "favorite")).toBe("Favorite status:printed");
+    expect(addRequiredTag("favorite ", "favorite")).toBe("favorite ");
+  });
+  it("replaces an exclusion of the same tag instead of adding a contradiction", () => {
+    expect(addRequiredTag("-favorite", "favorite")).toBe("favorite");
+    expect(addRequiredTag("category:animal -favorite \"Flexi  Dragon\"", "favorite")).toBe("category:animal \"Flexi  Dragon\" favorite");
+    expect(parseQuery(addRequiredTag("-status:printed status:queued", "status:printed"))).toEqual({ requiredTags: ["status:queued", "status:printed"], excludedTags: [], text: [] });
+  });
+  it("never treats quoted path text as the tag", () => {
+    expect(addRequiredTag('"favorite"', "favorite")).toBe('"favorite" favorite');
+  });
+});
 
 describe("query parsing", () => {
   it("parses required tags and NOT tags", () => {

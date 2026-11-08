@@ -32,7 +32,7 @@ export function AssetPreview({ asset, libraryId, disabled, load }: AssetPreviewP
 
   return (
     <section className="asset-preview" aria-label="Asset preview">
-      <div className="detail-heading">PREVIEW</div>
+      <div className="detail-heading">Preview</div>
       {asset.status === "missing" ? <p>Missing file cannot be previewed.</p>
         : asset.kind === "folder" ? <p>Double-click this folder to browse its contents.</p>
           : disabled ? <p>Preview unavailable while another operation is running.</p>

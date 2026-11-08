@@ -66,7 +66,7 @@ export function RemoveMissingEntryDialog({ asset, busy, error, onCancel, onConfi
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !disabled) onCancel(); }}>
       <section ref={dialogRef} className="workflow-dialog delete-dialog remove-entry-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={handleKeyDown}>
-        <div className="workflow-dialog-heading"><div><span className="dialog-eyebrow">REMOVE MISSING ENTRY</span><h2 id={titleId}>Remove entry for {asset.name}</h2></div><button className="icon-button" type="button" aria-label="Cancel removal" onClick={onCancel} disabled={disabled}><X size={17} /></button></div>
+        <div className="workflow-dialog-heading"><div><h2 id={titleId}>Remove entry for {asset.name}</h2></div><button className="icon-button" type="button" aria-label="Cancel removal" onClick={onCancel} disabled={disabled}><X size={17} /></button></div>
         <form aria-label="Remove missing entry confirmation" onSubmit={(event) => { event.preventDefault(); void confirmRemoval(); }}>
           <ul className="delete-target-list"><li><span title={asset.relativePath}>{asset.relativePath}</span>{asset.tags.length > 0 && <em>{asset.tags.join(", ")}</em>}</li></ul>
           <p className="bulk-warning">This file is no longer in its folder. Removing the entry deletes its tags{asset.notes ? " and notes" : ""} from the folder's .asset-tags.json. No asset files are changed. Export a metadata backup first if you might need them again.</p>

@@ -161,11 +161,11 @@ Rename cases for release acceptance must be run on Windows 11, Apple Silicon mac
 
 These cases require native execution for persistence claims. Palette/unit UI assertions and browser smoke alone do not prove native save/restart.
 
-## Gradient theme picker acceptance
+## Theme picker acceptance
 
 | ID | Action | Expected result |
 |---|---|---|
-| THEME-GRID-01 | Open theme picker at minimum supported 820×600 window and inspect all rows | Twenty named gradient swatches fit or scroll within the popover; selected state uses a check/outline as well as color; no page-level horizontal overflow |
+| THEME-GRID-01 | Open theme picker at minimum supported 820×600 window and inspect all rows | Twenty named flat swatches (frame, sheet, accent) fit or scroll within the popover; selected state uses a check/outline as well as color; no page-level horizontal overflow |
 | THEME-GRID-02 | Move with Arrow keys, Home and End, then press Escape | Focus moves without saving; Escape dismisses and restores trigger focus; committed theme remains unchanged |
 | THEME-GRID-03 | Focus another swatch and press Return or Space | Theme applies only after native settings commit; selected marker/name/tokens update together; picker stays open for comparison |
 | THEME-GRID-04 | Press Tab from a swatch and inspect next focus target | Popover closes without trapping focus; verify and record the exact destination control on each supported platform |
