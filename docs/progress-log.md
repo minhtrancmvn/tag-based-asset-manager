@@ -437,3 +437,11 @@ Not done: Partner Center upload and certification; the GitHub NSIS installer and
 2026-11-08: the first Partner Center upload of `0.6.0.0` (Store package run 42420532367 on `eb420bc`) failed package acceptance: "The PublisherDisplayName element in the app manifest of Tag-Based-Asset-Manager_0.6.0.0_x64.msix is Minh Tran, which doesn't match your publisher display name: kaishj91." The name `Minh Tran` is taken in Partner Center, so the manifest now uses `kaishj91`, the account's publisher display name. The rebuilt `0.6.0.0` package (Store package run 42422444473 on PR #17) passed Partner Center's upload validation, as reported by the account owner. Certification is pending.
 
 2026-11-09: Submission 1 (`0.6.0.0`, Store package run 42422444473) passed Microsoft certification and is published on the Microsoft Store, as reported by the account owner. The Store copy updates only through new submissions; GitHub releases after `0.6.0` (currently `0.7.0`) do not reach Store users until a higher version is submitted.
+
+## Automatic Microsoft Store submission (2026-11-09)
+
+The **Microsoft Store package** workflow can now submit new releases by itself, after each Release run and daily, with no approval step (the account owner's choice). It stays off until the repository variable `MSSTORE_PRODUCT_ID` exists. It signs in with a GitHub OIDC token and an Entra federated credential, so no client secret is stored. `scripts/store-submission.mjs` reads Partner Center first and stops the run if a submission is pending, because `msstore publish` v0.4.4 deletes pending submissions before creating its own (checked in its source, `IStorePackagedAPIExtensions.PublishAsync`). The CLI is installed by pinned SHA-256 rather than with `microsoft-store-apppublisher`, which does not verify its download. Details and setup are in [Microsoft Store edition](microsoft-store.md).
+
+Verification: 48 new script tests, including the Store API requests against a fake network; 120 script tests in total; actionlint on the workflow. Deliberately breaking the guard, the version check, the `main` restriction, the off switch or the sign-in made tests fail.
+
+Not done: no real Entra sign-in or Store submission has run, and the workflow's PowerShell submit steps have not executed. Setup and the first real run are pending.

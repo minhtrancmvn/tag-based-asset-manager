@@ -1,26 +1,107 @@
 name: Microsoft Store package
 
-# Builds the Store edition (no GitHub updater) and packs it as MSIX.
-# Manual runs only on main, plus pull requests that touch Store packaging, so releases never depend on it.
+# Builds the Store edition (no GitHub updater), packs it as MSIX and, once set up, submits new releases to the Store.
+# Pull requests that touch Store packaging and manual runs only build. After each Release run, daily, or on a manual
+# run with "submit", the highest release is built from its tag and submitted if Partner Center is ready for it.
+# Release never waits for this workflow, so releases do not depend on the Store. See docs/microsoft-store.md.
 on:
   workflow_dispatch:
+    inputs:
+      submit:
+        description: Submit the highest release to the Microsoft Store (main only)
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  # Picks up a release that was skipped because an earlier submission was still in certification.
+  schedule:
+    - cron: '23 5 * * *'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/store-msix.yml'
+      - 'scripts/store-submission.mjs'
       - 'src-tauri/store/**'
       - 'src-tauri/src/app_updates.rs'
 
 permissions:
   contents: read
 
+# Build-only runs replace each other. Submission runs are never cancelled midway, and only one runs at a time.
 concurrency:
-  group: store-msix-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.submit)) && format('store-msix-{0}', github.ref) || 'store-submission' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.submit) }}
 
 jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      ref: ${{ steps.plan.outputs.ref }}
+      tag: ${{ steps.plan.outputs.tag }}
+      store_version: ${{ steps.plan.outputs.store_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Decide what this run does
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUBMIT_INPUT: ${{ inputs.submit }}
+          MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+        run: |
+          RELEASE_TAGS=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName --jq '.[].tagName')
+          export RELEASE_TAGS
+          node scripts/store-submission.mjs plan
+
+  check:
+    name: Check Partner Center
+    needs: plan
+    if: needs.plan.outputs.mode == 'submit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: microsoft-store
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      proceed: ${{ steps.guard.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Read submission state (read-only)
+        id: guard
+        env:
+          MSSTORE_TENANT_ID: ${{ vars.MSSTORE_TENANT_ID }}
+          MSSTORE_CLIENT_ID: ${{ vars.MSSTORE_CLIENT_ID }}
+          MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+          STORE_VERSION: ${{ needs.plan.outputs.store_version }}
+        run: node scripts/store-submission.mjs check "$STORE_VERSION"
+
   msix:
     name: Store MSIX package
+    needs: [plan, check]
+    # `check` is skipped on build-only runs, so this job must not inherit that skip.
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.mode == 'build' ||
+      (needs.plan.outputs.mode == 'submit' && needs.check.outputs.proceed == 'true'))
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -29,7 +110,21 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.plan.outputs.ref }}
+          # Full history, so a submitted tag can be proven to be on main.
+          fetch-depth: ${{ needs.plan.outputs.mode == 'submit' && '0' || '1' }}
           persist-credentials: false
+
+      - name: Check the release tag
+        if: needs.plan.outputs.mode == 'submit'
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          STORE_VERSION: ${{ needs.plan.outputs.store_version }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ("$version.0" -ne $env:STORE_VERSION) { throw "Tag $env:TAG holds app version $version, expected $env:STORE_VERSION" }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Tag $env:TAG is not on main" }
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
@@ -128,3 +223,79 @@ jobs:
           path: msix-test/
           retention-days: 14
           if-no-files-found: error
+
+  submit:
+    name: Submit to Microsoft Store
+    needs: [plan, check, msix]
+    if: needs.plan.outputs.mode == 'submit' && needs.check.outputs.proceed == 'true' && needs.msix.result == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    # Microsoft Entra trusts GitHub's OIDC token only for this environment, so no client secret is stored anywhere.
+    environment: microsoft-store
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      MSSTORE_TENANT_ID: ${{ vars.MSSTORE_TENANT_ID }}
+      MSSTORE_CLIENT_ID: ${{ vars.MSSTORE_CLIENT_ID }}
+      MSSTORE_SELLER_ID: ${{ vars.MSSTORE_SELLER_ID }}
+      MSSTORE_PRODUCT_ID: ${{ vars.MSSTORE_PRODUCT_ID }}
+      STORE_VERSION: ${{ needs.plan.outputs.store_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: store-msix-upload
+          path: upload
+
+      - name: Verify the package
+        run: |
+          $expected = "Tag-Based-Asset-Manager_$($env:STORE_VERSION)_x64.msix"
+          $packages = @(Get-ChildItem upload/*.msix)
+          if ($packages.Count -ne 1 -or $packages[0].Name -ne $expected) { throw "Expected only $expected, found: $($packages.Name -join ', ')" }
+          $hash = (Get-FileHash $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ((Get-Content upload/SHA256SUMS.txt -Raw) -notmatch "(?m)^$hash  $([regex]::Escape($expected))$") { throw 'The package does not match SHA256SUMS.txt' }
+          "MSIX_PATH=$($packages[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      # The build took a while. `msstore publish` deletes a pending submission, so look again right before it.
+      - name: Read submission state again (read-only)
+        id: guard
+        run: node scripts/store-submission.mjs check $env:STORE_VERSION
+
+      # Installed by hash rather than with microsoft-store-apppublisher, which does not verify its download:
+      # this binary signs in with Manager rights on the Store account.
+      - name: Install Microsoft Store CLI v0.4.4
+        if: steps.guard.outputs.proceed == 'true'
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'msstore.zip'
+          $destination = Join-Path $env:RUNNER_TEMP 'msstore'
+          Invoke-WebRequest 'https://github.com/microsoft/msstore-cli/releases/download/v0.4.4/MSStoreCLI-win-x64.zip' -OutFile $archive
+          $expected = 'd288a324541dc68244a683eb5b6445e9239bb47d1e6acf5cca4d1476017f1447'
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'msstore archive checksum mismatch' }
+          Expand-Archive $archive -DestinationPath $destination
+          $destination | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Submit for certification
+        if: steps.guard.outputs.proceed == 'true'
+        # The app is free. `--priceId Free` is needed because publish stops when a product's price is managed per
+        # market, and it would set a paid product to free: change this line before ever charging for the app.
+        run: |
+          $idTokenUrl = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=$([uri]::EscapeDataString('api://AzureADTokenExchange'))"
+          $idToken = (Invoke-RestMethod -Uri $idTokenUrl -Headers @{ Authorization = "Bearer $($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)" }).value
+          Write-Output "::add-mask::$idToken"
+          $env:MSSTORE_CLIENT_ASSERTION = $idToken
+          msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID --sellerId $env:MSSTORE_SELLER_ID --clientId $env:MSSTORE_CLIENT_ID --clientAssertion
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          msstore publish $env:MSIX_PATH -id $env:MSSTORE_PRODUCT_ID --priceId Free
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Submitted $env:STORE_VERSION for certification." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

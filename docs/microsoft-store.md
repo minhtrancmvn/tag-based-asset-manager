@@ -22,7 +22,7 @@ How it works:
 
 ## Building the packages
 
-Actions → **Microsoft Store package** → **Run workflow** on `main`. It also runs on pull requests that change Store packaging. It never runs as part of a release.
+Actions → **Microsoft Store package** → **Run workflow** on `main`, with **submit** off, builds the packages from the selected branch without touching Partner Center. Pull requests that change Store packaging do the same.
 
 Artifacts, kept for 14 days:
 
@@ -75,11 +75,47 @@ Clean up afterwards: in PowerShell run as administrator, `Remove-Item Cert:\Loca
 
 ## Store updates
 
-- GitHub releases and the in-app updater never reach Store users. To ship a release to them, run the workflow on `main` after the release and upload its `store-msix-upload` package in a new submission.
-- Each submission needs a higher version than the last; Submission 1 was `0.6.0.0`.
-- Every submission goes through certification again.
+GitHub releases and the in-app updater never reach Store users; each release needs its own submission. Once set up, the **Microsoft Store package** workflow does this with no human step: a release that passes Microsoft certification is published to users automatically, and it has only been tested by CI.
+
+It runs after each Release run and once a day, and takes the highest release:
+
+1. Reads Partner Center through the read-only Store submission API.
+2. If that release is newer than the Store's version and nothing is pending, builds the MSIX from the release tag and checks that the tag is on `main`.
+3. Reads Partner Center again, then submits with the [Microsoft Store Developer CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/overview).
+
+A run stops with a warning, without changing anything, when:
+
+- **A submission is pending in Partner Center**, including a draft you started by hand or one in certification. This matters because `msstore publish` deletes a pending submission before creating its own. The daily run tries again once the pending one is published or deleted. The one exception is a submission whose commit failed, which the CLI replaces.
+- **The Store already has that version or a higher one.** Each submission needs a higher version than the last.
+
+While one submission is in certification, later releases wait, and the daily run then submits only the newest. Store listing text, including "What's new", carries over from the previous submission; change it in Partner Center.
+
+The submit step passes `--priceId Free`, because the app is free and `msstore publish` otherwise stops on a product whose price is managed per market. Change that step before ever charging for the app: it would set the price to free.
+
+To submit without waiting: Actions → **Microsoft Store package** → **Run workflow** on `main`, with **submit** on.
+
+### One-time setup
+
+Nothing is submitted until the repository variable `MSSTORE_PRODUCT_ID` exists. No client secret is stored: Microsoft Entra trusts GitHub's short-lived sign-in token, and only for jobs in this repository's `microsoft-store` environment, which only `main` can use.
+
+1. **Tenant.** Partner Center needs an associated Microsoft Entra tenant: [create a new one](https://learn.microsoft.com/en-us/windows/apps/publish/partner-center/create-new-azure-ad-tenant) or [associate an existing one](https://learn.microsoft.com/en-us/windows/apps/publish/partner-center/associate-existing-azure-ad-tenant-with-partner-center-account). You need Global administrator rights on it.
+2. **App registration.** In the [Entra admin center](https://entra.microsoft.com/), App registrations → New registration, single tenant, no redirect URI. Note the **Application (client) ID** and **Directory (tenant) ID**.
+3. **Federated credential.** On that app: Certificates & secrets → Federated credentials → Add credential → **GitHub Actions deploying Azure resources**. Organization `minhtrancmvn`, repository `tag-based-asset-manager`, entity type **Environment**, environment `microsoft-store`. Keep the default audience `api://AzureADTokenExchange`. Do not add a client secret.
+4. **Partner Center role.** Account settings → User management → Microsoft Entra applications → add the app with the **Manager** role.
+5. **IDs.** Note the **Seller ID** from Partner Center account settings and the app's **Store ID** from its Product identity page.
+6. **Repository variables.** These are identifiers, not secrets. Set `MSSTORE_PRODUCT_ID` last, because it switches submission on:
+
+   ```sh
+   gh variable set MSSTORE_TENANT_ID --body '<directory (tenant) ID>'
+   gh variable set MSSTORE_CLIENT_ID --body '<application (client) ID>'
+   gh variable set MSSTORE_SELLER_ID --body '<seller ID>'
+   gh variable set MSSTORE_PRODUCT_ID --body '<Store ID>'
+   ```
+
+To switch submission off, delete `MSSTORE_PRODUCT_ID`.
 
 ## Not verified yet
 
 - Installing from the Store listing, and Store-delivered upgrades between Store versions. The Windows 11 test above used sideloaded, test-signed packages.
+- Automatic submission. The workflow's decisions and Store API calls have automated tests against a fake network, but it has not yet signed in to Entra or submitted anything. The first real run is the test.
 - WebView2 on older Windows 10 machines; Windows 11 includes it.
