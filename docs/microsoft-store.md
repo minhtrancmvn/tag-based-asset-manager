@@ -1,6 +1,6 @@
 # Microsoft Store edition
 
-Status (2026-11-08): the Store build and MSIX packaging exist, and the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10). The first Partner Center upload (`0.6.0.0`) failed validation on `PublisherDisplayName`, fixed below; the corrected `0.6.0.0` package passed Partner Center's upload validation on 2026-11-08. Certification has not finished yet.
+Status (2026-11-09): published on the Microsoft Store. Submission 1, the `0.6.0.0` upload package from Store package run [42422444473](https://github.com/minhtrancmvn/tag-based-asset-manager/actions/runs/42422444473), passed Microsoft certification and is live, as reported by the account owner. Before that, the test-signed package passed every Windows 11 test below (STORE-01 to STORE-10), and the first upload failed validation on `PublisherDisplayName` (fixed below).
 
 ## What differs from the GitHub download
 
@@ -73,7 +73,13 @@ Clean up afterwards: in PowerShell run as administrator, `Remove-Item Cert:\Loca
 - Privacy policy: Partner Center requires one because the package declares `runFullTrust`. The policy is [privacy-policy.md](privacy-policy.md); paste its text under **Provide privacy policy text**, or link to it on GitHub. The app collects no personal data and, in the Store edition, makes no network requests of its own.
 - Microsoft certification usually takes a few days.
 
+## Store updates
+
+- GitHub releases and the in-app updater never reach Store users. To ship a release to them, run the workflow on `main` after the release and upload its `store-msix-upload` package in a new submission.
+- Each submission needs a higher version than the last; Submission 1 was `0.6.0.0`.
+- Every submission goes through certification again.
+
 ## Not verified yet
 
-- Microsoft certification and the published Store listing.
+- Installing from the Store listing, and Store-delivered upgrades between Store versions. The Windows 11 test above used sideloaded, test-signed packages.
 - WebView2 on older Windows 10 machines; Windows 11 includes it.
