@@ -159,7 +159,7 @@ OS-level code signing warnings remain distinct from updater cryptographic signin
   - The user has an uncommitted metadata draft in the inspector
   - Any confirmation or edit modal dialog is open
 - **Shell Inactivity & Retry Recovery**: When an install is confirmed, the app shell becomes inert during download and signature verification. If the download fails or network disconnects, the shell unlocks, reports the error, and re-enables retry without crashing.
-- **Network Metadata Disclosure & Zero Telemetry**: Checking the update feed discloses standard HTTP transport metadata (client IP address and user-agent string) to the GitHub raw content endpoint (`raw.githubusercontent.com`). No telemetry, analytics, hardware identifiers, or library data are collected or transmitted.
+- **Network Metadata Disclosure**: Checking the update feed discloses standard HTTP transport metadata (client IP address and user-agent string) to the GitHub raw content endpoint (`raw.githubusercontent.com`). The update check carries no telemetry, analytics, hardware identifiers or library data. Opt-in usage data is separate; see the [privacy policy](privacy-policy.md).
 - **Unsupported Host vs Missing Platform**:
   - *Unsupported Host*: On unsupported operating systems or builds without `TAURI_UPDATER_PUBLIC_KEY`, updater capabilities are disabled at compile-time/runtime; no background checks occur.
   - *Missing Platform in Feed*: If `latest.json` announces a newer version but omits the running target platform in `platforms`, `tauri-plugin-updater` returns `Err(Error::TargetNotFound)` (`updater.rs:127, 720`). When the feed version is equal to or older than the installed version, the plugin returns `Ok(None)` without inspecting target platforms.
