@@ -58,11 +58,28 @@ export interface BulkTagResult {
   error: AppError | null;
 }
 
+export type UsageConsent = "undecided" | "granted" | "declined";
+
+/** Effective usage-sharing choice reported by native code on every library state. */
+export interface UsageSummary {
+  available: boolean;
+  consent: UsageConsent;
+  saved: boolean;
+}
+
+/** `usage` is present only on saved and stoppedNotSaved; `reason` only on stoppedNotSaved. */
+export interface UsageConsentResult {
+  status: "saved" | "busy" | "failed" | "stoppedNotSaved";
+  usage?: UsageSummary;
+  reason?: "busy" | "failed";
+}
+
 export interface LibraryState {
   libraries: LibrarySummary[];
   activeLibraryId: string | null;
   savedSearches?: SavedSearch[];
   theme?: AppTheme;
+  usage?: UsageSummary;
 }
 
 export interface AppError {

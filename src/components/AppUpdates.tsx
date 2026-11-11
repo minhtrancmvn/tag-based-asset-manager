@@ -16,6 +16,8 @@ export interface AppUpdatesProps {
   blockedReason: string | null;
   getBlockedReason?: () => string | null;
   onInstallingChange: (installing: boolean) => void;
+  /** Reports whether the update dialog is open, so App can keep other dialogs from opening over it. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -31,6 +33,7 @@ export function AppUpdates({
   blockedReason,
   getBlockedReason,
   onInstallingChange,
+  onOpenChange,
 }: AppUpdatesProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
@@ -38,6 +41,8 @@ export function AppUpdates({
   const mountedRef = useRef<boolean>(true);
   const checkPromiseRef = useRef<Promise<UpdateCheck> | null>(null);
   const installingRef = useRef<boolean>(false);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
 
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -93,6 +98,10 @@ export function AppUpdates({
       active = false;
     };
   }, [enabled]);
+
+  useEffect(() => {
+    onOpenChangeRef.current?.(modalOpen);
+  }, [modalOpen]);
 
   // Focus trap and initial focus on modal open
   useEffect(() => {

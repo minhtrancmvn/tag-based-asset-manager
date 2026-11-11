@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LibraryClient } from "./native";
 import { nativeClient, toAppError } from "./native";
 import { deriveRenameMigration, normalizeRenameMapping } from "./tagRename";
+import { sizeRange, trackUsage as sendUsageEvent } from "./usage";
+import type { UsageEvent } from "./usage";
 import type { RenameBlocker, RenameMappingError, RenameMigration } from "./tagRename";
 import type {
   AppError, AppTheme, Asset, AssetAction, ExportResult, LibraryState, PreviewResult, RenameApplyResult, RenameDiscardReason,
-  RenameMapping, RenameMode, RenamePreview, RenamePreviewRequest, RenameTargetSummary, SavedSearch, ScanIssue, ScanResult, SearchFilters, ValidationReport,
+  RenameMapping, RenameMode, RenamePreview, RenamePreviewRequest, RenameTargetSummary, SavedSearch, ScanIssue, ScanResult, SearchFilters, UsageConsentResult, ValidationReport,
 } from "./types";
 
 const emptyState: LibraryState = { libraries: [], activeLibraryId: null };
@@ -141,6 +143,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const [bulkEditing, setBulkEditing] = useState(false);
   const [savingSearch, setSavingSearch] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
+  const [savingUsage, setSavingUsage] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -157,6 +160,12 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const operation = useRef(false);
   const activeRename = useRef<ActiveRename | null>(null);
   const pendingRename = useRef<PendingRename | null>(null);
+  /** Guards only `setUsageConsent`; deliberately independent of `operation`, `scanBusy` and `loading`. */
+  const usageSaving = useRef(false);
+  /** Libraries whose first completed scan this launch was already counted for `library_scanned`. */
+  const scannedLibraries = useRef(new Set<string>());
+
+  const trackUsage = useCallback((event: UsageEvent): void => sendUsageEvent(client, event), [client]);
 
   const scan = useCallback(async (libraryId: string) => {
     const generation = ++scanGeneration.current;
@@ -189,6 +198,11 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       };
       stateRef.current = updated;
       setState(updated);
+      // Only an effective "granted" consumes the once-per-launch slot, so a later opt-in still reports one scan.
+      if (stateRef.current.usage?.consent === "granted" && !scannedLibraries.current.has(libraryId)) {
+        scannedLibraries.current.add(libraryId);
+        trackUsage({ name: "library_scanned", size_range: sizeRange(result.assets.length) });
+      }
     } catch (failure) {
       if (current()) setError(toAppError(failure));
     } finally {
@@ -198,7 +212,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
         scanBusy.current = false;
       }
     }
-  }, [client]);
+  }, [client, trackUsage]);
 
   const cancelScan = useCallback(async () => {
     const scan = activeScan.current;
@@ -286,9 +300,22 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     }
   }, [client, applyState]);
 
-  const chooseLibrary = useCallback(() => mutateRegistration(client.choose), [client, mutateRegistration]);
-  const activateLibrary = useCallback((id: string) => mutateRegistration(() => client.activate(id)), [client, mutateRegistration]);
-  const removeLibrary = useCallback((id: string) => mutateRegistration(() => client.remove(id)), [client, mutateRegistration]);
+  // mutateRegistration resolves to nothing, so each wrapper compares stateRef (which applyState updates) around the await.
+  const chooseLibrary = useCallback(async (): Promise<void> => {
+    const before = stateRef.current.libraries.length;
+    await mutateRegistration(client.choose);
+    if (stateRef.current.libraries.length > before) trackUsage({ name: "library_add" });
+  }, [client, mutateRegistration, trackUsage]);
+  const activateLibrary = useCallback(async (id: string): Promise<void> => {
+    const before = stateRef.current.activeLibraryId;
+    await mutateRegistration(() => client.activate(id));
+    if (stateRef.current.activeLibraryId !== before) trackUsage({ name: "library_switch" });
+  }, [client, mutateRegistration, trackUsage]);
+  const removeLibrary = useCallback(async (id: string): Promise<void> => {
+    const before = stateRef.current.libraries.length;
+    await mutateRegistration(() => client.remove(id));
+    if (stateRef.current.libraries.length < before) trackUsage({ name: "library_remove" });
+  }, [client, mutateRegistration, trackUsage]);
   const rescan = useCallback(async () => {
     const id = stateRef.current.activeLibraryId;
     if (client.isDesktop && id && !operation.current && !scanBusy.current) await scan(id);
@@ -306,6 +333,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       if (!current()) return false;
       if (updated.id !== asset.id || updated.relativePath !== asset.relativePath) throw new Error("Metadata response did not match the selected asset.");
       setAssets((rows) => rows.map((row) => row.id === asset.id ? updated : row));
+      trackUsage({ name: "tag_edit" });
       return true;
     } catch (failure) {
       if (current()) setError(toAppError(failure));
@@ -314,7 +342,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       operation.current = false;
       if (mounted.current) setEditingAssetId(null);
     }
-  }, [client]);
+  }, [client, trackUsage]);
   const editNotes = useCallback(async (asset: Asset, notes: string): Promise<boolean> => {
     const libraryId = stateRef.current.activeLibraryId;
     if (!client.isDesktop || !libraryId || operation.current || scanBusy.current || asset.status === "missing" || asset.metadataState === "blocked" || !asset.metadataRevision) return false;
@@ -354,6 +382,8 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       if (new Set(result.assets.map((asset) => asset.id)).size !== result.assets.length || result.assets.some((asset) => requested.get(asset.id) !== asset.relativePath)) throw new Error("Bulk response did not match selected assets.");
       const updated = new Map(result.assets.map((asset) => [asset.id, asset]));
       setAssets((rows) => rows.map((row) => updated.get(row.id) ?? row));
+      // Committed rows count even when the batch later failed; a zero-row result changed nothing.
+      if (result.assets.length > 0) trackUsage({ name: "bulk_tag_edit" });
       if (result.error) { setError(result.error); return false; }
       if (result.assets.length !== targets.length) throw new Error("Bulk response omitted selected assets.");
       return true;
@@ -364,7 +394,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       operation.current = false;
       if (mounted.current) setBulkEditing(false);
     }
-  }, [client]);
+  }, [client, trackUsage]);
 
   const mutateSearch = useCallback(async (action: (libraryId: string) => Promise<LibraryState>): Promise<boolean> => {
     const libraryId = stateRef.current.activeLibraryId;
@@ -401,6 +431,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       const updated = { ...stateRef.current, theme: next.theme };
       stateRef.current = updated;
       setState(updated);
+      trackUsage({ name: "theme_change", theme: next.theme });
       return true;
     } catch (failure) {
       if (mounted.current) setError(toAppError(failure));
@@ -409,9 +440,39 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       operation.current = false;
       if (mounted.current) setSavingTheme(false);
     }
-  }, [client, loading]);
-  const saveSearch = useCallback((name: string, filters: SearchFilters, searchId?: string) => mutateSearch((libraryId) => client.saveSearch(libraryId, name, filters, searchId ?? null)), [client, mutateSearch]);
-  const deleteSearch = useCallback((searchId: string) => mutateSearch((libraryId) => client.deleteSearch(libraryId, searchId)), [client, mutateSearch]);
+  }, [client, loading, trackUsage]);
+  const setUsageConsent = useCallback(async (consent: "granted" | "declined"): Promise<UsageConsentResult> => {
+    if (!client.isDesktop) return { status: "failed" };
+    // A second call while one is in flight does not reach native; it reports "busy" and leaves the first call's result untouched.
+    if (usageSaving.current) return { status: "busy" };
+    usageSaving.current = true;
+    setSavingUsage(true);
+    try {
+      const result = await client.setUsageConsent(consent);
+      // Merge the effective choice the way setTheme merges `theme`; never applyState, never the global error.
+      if (mounted.current && result.usage) {
+        const updated = { ...stateRef.current, usage: result.usage };
+        stateRef.current = updated;
+        setState(updated);
+      }
+      return result;
+    } catch {
+      return { status: "failed" };
+    } finally {
+      usageSaving.current = false;
+      if (mounted.current) setSavingUsage(false);
+    }
+  }, [client]);
+  const saveSearch = useCallback(async (name: string, filters: SearchFilters, searchId?: string): Promise<boolean> => {
+    const saved = await mutateSearch((libraryId) => client.saveSearch(libraryId, name, filters, searchId ?? null));
+    if (saved) trackUsage({ name: "saved_search_save" });
+    return saved;
+  }, [client, mutateSearch, trackUsage]);
+  const deleteSearch = useCallback(async (searchId: string): Promise<boolean> => {
+    const deleted = await mutateSearch((libraryId) => client.deleteSearch(libraryId, searchId));
+    if (deleted) trackUsage({ name: "saved_search_delete" });
+    return deleted;
+  }, [client, mutateSearch, trackUsage]);
   const runNativeOperation = useCallback(async <T,>(action: (libraryId: string) => Promise<T>, onResult: (result: T, libraryId: string) => boolean, recovery = false): Promise<boolean> => {
     const libraryId = stateRef.current.activeLibraryId;
     if (!client.isDesktop || !libraryId || operation.current || scanBusy.current) return false;
@@ -433,8 +494,10 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   }, [client]);
   const performAction = useCallback(async (asset: Asset, action: AssetAction) => {
     if (asset.status === "missing") return false;
-    return runNativeOperation((libraryId) => client.performAction(libraryId, asset.id, action), () => true);
-  }, [client, runNativeOperation]);
+    const succeeded = await runNativeOperation((libraryId) => client.performAction(libraryId, asset.id, action), () => true);
+    if (succeeded) trackUsage({ name: action === "open" ? "asset_open" : action === "reveal" ? "asset_reveal" : "path_copy" });
+    return succeeded;
+  }, [client, runNativeOperation, trackUsage]);
   const validateMetadata = useCallback(() => runNativeOperation((libraryId) => client.validateMetadata(libraryId), (report, libraryId) => {
     if (report.libraryId !== libraryId) throw new Error("Validation response did not match active library.");
     setValidation(report);
@@ -444,9 +507,11 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     setExportResult(null);
     return runNativeOperation((libraryId) => client.exportMetadata(libraryId), (result) => {
       setExportResult(result);
-      return result !== null;
+      if (result === null) return false;
+      trackUsage({ name: "metadata_export" });
+      return true;
     });
-  }, [client, runNativeOperation]);
+  }, [client, runNativeOperation, trackUsage]);
   const getReconnectTargets = useCallback(async (asset: Asset): Promise<Asset[] | null> => {
     if (asset.status !== "missing" || asset.metadataState !== "valid" || !asset.metadataRevision || !asset.metadataId) return null;
     let choices: Asset[] | null = null;
@@ -466,12 +531,16 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   }, []);
   const reconnectAsset = useCallback(async (source: Asset, target: Asset) => {
     if (source.status !== "missing" || source.metadataState !== "valid" || !source.metadataRevision || !source.metadataId || target.status === "missing" || target.kind !== "file" || target.metadataId || target.metadataState === "blocked") return false;
-    return runNativeOperation((libraryId) => client.reconnectAsset(libraryId, source.id, source.metadataRevision!, target.id), applyRepairScan, true);
-  }, [client, runNativeOperation, applyRepairScan]);
+    const reconnected = await runNativeOperation((libraryId) => client.reconnectAsset(libraryId, source.id, source.metadataRevision!, target.id), applyRepairScan, true);
+    if (reconnected) trackUsage({ name: "asset_reconnect" });
+    return reconnected;
+  }, [client, runNativeOperation, applyRepairScan, trackUsage]);
   const removeMissingEntry = useCallback(async (asset: Asset) => {
     if (asset.status !== "missing" || asset.metadataState !== "valid" || !asset.metadataRevision || !asset.metadataId) return false;
-    return runNativeOperation((libraryId) => client.removeMissingEntry(libraryId, asset.id, asset.metadataRevision!), applyRepairScan, true);
-  }, [client, runNativeOperation, applyRepairScan]);
+    const removed = await runNativeOperation((libraryId) => client.removeMissingEntry(libraryId, asset.id, asset.metadataRevision!), applyRepairScan, true);
+    if (removed) trackUsage({ name: "missing_entry_remove" });
+    return removed;
+  }, [client, runNativeOperation, applyRepairScan, trackUsage]);
   const deleteAssets = useCallback(async (targets: Asset[]): Promise<boolean> => {
     const libraryId = stateRef.current.activeLibraryId;
     if (!client.isDesktop || !libraryId || operation.current || scanBusy.current || targets.length === 0) return false;
@@ -487,6 +556,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       if (!current()) return false;
       const requested = new Map(targets.map((asset) => [asset.id, asset]));
       if (new Set(result.completedIds).size !== result.completedIds.length || result.completedIds.some((id) => !requested.has(id))) throw new Error("Delete response did not match selected assets.");
+      if (result.completedIds.length > 0) trackUsage({ name: "asset_trash" });
       const removed = result.completedIds.map((id) => requested.get(id)!);
       setAssets((rows) => rows.filter((row) => !removed.some((asset) => row.id === asset.id || (asset.kind === "folder" && row.relativePath.startsWith(`${asset.relativePath}/`)))));
       setValidation(null);
@@ -501,7 +571,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       operation.current = false;
       if (mounted.current) setDeleting(false);
     }
-  }, [client]);
+  }, [client, trackUsage]);
   const previewAsset = useCallback(async (asset: Asset): Promise<PreviewResult | null> => {
     const libraryId = stateRef.current.activeLibraryId;
     if (!client.isDesktop || !libraryId || asset.status === "missing" || scanBusy.current || operation.current) return null;
@@ -604,6 +674,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       validateRenameApply(result, pending, stateRef.current.savedSearches ?? []);
       // Everything below runs only for a fully validated result, including partial results that carry an error.
       if (result.committed.length > 0) {
+        trackUsage({ name: "tag_rename" });
         const committed = new Map(result.committed.map((asset) => [asset.id, asset]));
         setAssets((rows) => rows.map((row) => committed.get(row.id) ?? row));
       }
@@ -631,7 +702,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
       operation.current = false;
       if (mounted.current) setRenameApplying(false);
     }
-  }, [client]);
+  }, [client, trackUsage]);
   const dismissError = useCallback(() => setError(null), []);
 
   return {
@@ -639,7 +710,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
     assets, issues, loading, scanning, scanStopped, progress, error, cancelScan,
     chooseLibrary, activateLibrary, removeLibrary, rescan, editTags, editingAssetId, editNotes, editingNotesAssetId,
     bulkEditTags, bulkEditing, savedSearches: (state.savedSearches ?? []).filter((search) => search.libraryId === state.activeLibraryId),
-    savingSearch, saveSearch, deleteSearch, savingTheme, setTheme, performAction, actionBusy,
+    savingSearch, saveSearch, deleteSearch, savingTheme, setTheme, savingUsage, setUsageConsent, trackUsage, performAction, actionBusy,
     validateMetadata, validation, exportMetadata, exportResult, getReconnectTargets, reconnectAsset, removeMissingEntry, recoveryBusy,
     deleteAssets, deleting, previewAsset,
     previewTagRename, cancelTagRenamePreview, applyTagRename, renamePreviewing, renameApplying, renameProgress,

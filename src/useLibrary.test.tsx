@@ -37,6 +37,8 @@ function client(overrides: Partial<LibraryClient> = {}): LibraryClient {
       committed: [], failed: [], unattempted: [], failingSidecar: null, skipped: [], uninspectable: [],
       savedSearches: [], error: null, outcome: "complete", queryMigrated: true,
     } satisfies RenameApplyResult),
+    setUsageConsent: vi.fn().mockResolvedValue({ status: "saved", usage: { available: true, consent: "declined", saved: true } }),
+    trackUsage: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -1252,3 +1254,414 @@ describe("tag rename apply", () => {
     expect(api.scan).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Usage analytics: events after success and the consent command (T13)
+// ---------------------------------------------------------------------------------------------------------------------
+const sharing = { available: true, consent: "granted" as const, saved: true };
+const notSharing = { available: true, consent: "declined" as const, saved: true };
+const undecided = { available: true, consent: "undecided" as const, saved: true };
+const stoppedUsage = { available: true, consent: "declined" as const, saved: false };
+const second = { id: "root2", name: "Second", rootPath: "/selected/second", assetCount: 0, lastScanAt: null };
+const bothLibraries: LibraryState = { libraries: [...registered.libraries, second], activeLibraryId: "root2" };
+const failure = { message: "Native failure", path: null, details: "injected" };
+const sent = (api: LibraryClient) => vi.mocked(api.trackUsage).mock.calls.map(([event]) => event);
+async function loadedHook(api: LibraryClient) {
+  const hook = renderHook(() => useLibrary(api));
+  await waitFor(() => expect(hook.result.current.assets).toHaveLength(1));
+  return hook;
+}
+const secondRow = { ...scanResult.assets[0]!, id: "path:b.stl", name: "b.stl", relativePath: "b.stl" };
+
+describe("usage events fire only after success", () => {
+  it("sends tag_edit after a successful edit and nothing when the edit fails or is refused", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    await act(async () => { expect(await result.current.editTags(result.current.assets[0]!, ["x"], [])).toBe(true); });
+    expect(sent(api)).toEqual([{ name: "tag_edit" }]);
+
+    const failing = client({ editTags: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    await act(async () => { expect(await other.result.current.editTags(other.result.current.assets[0]!, ["x"], [])).toBe(false); });
+    const missing = { ...other.result.current.assets[0]!, status: "missing" as const };
+    await act(async () => { expect(await other.result.current.editTags(missing, ["x"], [])).toBe(false); });
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends bulk_tag_edit for a full result and for a partial result with an error, but not for zero committed rows or a rejection", async () => {
+    const full = client({ bulkEditTags: vi.fn().mockResolvedValue({ assets: [{ ...scanResult.assets[0]!, tags: ["x"] }], error: null }) });
+    const fullHook = await loadedHook(full);
+    await act(async () => { expect(await fullHook.result.current.bulkEditTags(fullHook.result.current.assets, ["x"], [])).toBe(true); });
+    expect(sent(full)).toEqual([{ name: "bulk_tag_edit" }]);
+
+    const partial = client({ bulkEditTags: vi.fn().mockResolvedValue({ assets: [{ ...scanResult.assets[0]!, tags: ["x"] }], error: failure }) });
+    const partialHook = await loadedHook(partial);
+    await act(async () => { expect(await partialHook.result.current.bulkEditTags([partialHook.result.current.assets[0]!, secondRow], ["x"], [])).toBe(false); });
+    expect(partialHook.result.current.error).toEqual(failure);
+    expect(sent(partial)).toEqual([{ name: "bulk_tag_edit" }]);
+
+    const zero = client({ bulkEditTags: vi.fn().mockResolvedValue({ assets: [], error: failure }) });
+    const zeroHook = await loadedHook(zero);
+    await act(async () => { expect(await zeroHook.result.current.bulkEditTags(zeroHook.result.current.assets, ["x"], [])).toBe(false); });
+    expect(sent(zero)).toEqual([]);
+
+    const rejected = client({ bulkEditTags: vi.fn().mockRejectedValue(failure) });
+    const rejectedHook = await loadedHook(rejected);
+    await act(async () => { expect(await rejectedHook.result.current.bulkEditTags(rejectedHook.result.current.assets, ["x"], [])).toBe(false); });
+    expect(sent(rejected)).toEqual([]);
+  });
+
+  it("sends tag_rename only when at least one row committed", async () => {
+    const complete = await setupRename();
+    await previewNow(complete.result);
+    await applyNow(complete.result, queryBinding("old"));
+    expect(sent(complete.api)).toEqual([{ name: "tag_rename" }]);
+
+    const partialSome = await setupRename({
+      applyTagRename: vi.fn(async () => applyResult({
+        committed: [renamedRows[0]!], failed: [previewTargets[1]!], unattempted: [previewTargets[2]!], failingSidecar: ".",
+        savedSearches: [], error: failure, outcome: "partial", queryMigrated: false,
+      })),
+    });
+    await previewNow(partialSome.result);
+    await applyNow(partialSome.result, queryBinding("old"));
+    expect(sent(partialSome.api)).toEqual([{ name: "tag_rename" }]);
+
+    const none = await setupRename({
+      applyTagRename: vi.fn(async () => applyResult({
+        committed: [], failed: [previewTargets[0]!], unattempted: [previewTargets[1]!, previewTargets[2]!], failingSidecar: ".",
+        savedSearches: [], error: failure, outcome: "partial", queryMigrated: false,
+      })),
+    });
+    await previewNow(none.result);
+    expect(await applyNow(none.result, queryBinding("old"))).toMatchObject({ status: "applied" });
+    expect(sent(none.api)).toEqual([]);
+
+    const rejected = await setupRename({ applyTagRename: vi.fn().mockRejectedValue(failure) });
+    await previewNow(rejected.result);
+    expect(await applyNow(rejected.result, queryBinding("old"))).toEqual({ status: "failed" });
+    expect(sent(rejected.api)).toEqual([]);
+  });
+
+  it("sends saved_search_save and saved_search_delete after success only", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    await act(async () => { expect(await result.current.saveSearch("Name", searchFilters("x"))).toBe(true); });
+    await act(async () => { expect(await result.current.deleteSearch("s1")).toBe(true); });
+    expect(sent(api)).toEqual([{ name: "saved_search_save" }, { name: "saved_search_delete" }]);
+
+    const failing = client({ saveSearch: vi.fn().mockRejectedValue(failure), deleteSearch: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    await act(async () => { expect(await other.result.current.saveSearch("Name", searchFilters("x"))).toBe(false); });
+    await act(async () => { expect(await other.result.current.deleteSearch("s1")).toBe(false); });
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends metadata_export after a saved export and nothing for a cancelled picker or a failure", async () => {
+    const api = client({ exportMetadata: vi.fn().mockResolvedValue({ path: "/backup.json", assetCount: 1 }) });
+    const { result } = await loadedHook(api);
+    await act(async () => { expect(await result.current.exportMetadata()).toBe(true); });
+    expect(sent(api)).toEqual([{ name: "metadata_export" }]);
+
+    const cancelled = client({ exportMetadata: vi.fn().mockResolvedValue(null) });
+    const cancelledHook = await loadedHook(cancelled);
+    await act(async () => { expect(await cancelledHook.result.current.exportMetadata()).toBe(false); });
+    expect(sent(cancelled)).toEqual([]);
+
+    const failing = client({ exportMetadata: vi.fn().mockRejectedValue(failure) });
+    const failingHook = await loadedHook(failing);
+    await act(async () => { expect(await failingHook.result.current.exportMetadata()).toBe(false); });
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends asset_reconnect and missing_entry_remove after success only", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    const missing = { ...result.current.assets[0]!, status: "missing" as const, metadataState: "valid" as const, metadataId: "uuid" };
+    await act(async () => { expect(await result.current.reconnectAsset(missing, result.current.assets[0]!)).toBe(true); });
+    await act(async () => { expect(await result.current.removeMissingEntry(missing)).toBe(true); });
+    expect(sent(api)).toEqual([{ name: "asset_reconnect" }, { name: "missing_entry_remove" }]);
+
+    const failing = client({ reconnectAsset: vi.fn().mockRejectedValue(failure), removeMissingEntry: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    const target = other.result.current.assets[0]!;
+    await act(async () => { expect(await other.result.current.reconnectAsset(missing, target)).toBe(false); });
+    await act(async () => { expect(await other.result.current.removeMissingEntry(missing)).toBe(false); });
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends asset_trash when at least one item moved, including a partial result, and not for zero or a rejection", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    await act(async () => { expect(await result.current.deleteAssets(result.current.assets)).toBe(true); });
+    expect(sent(api)).toEqual([{ name: "asset_trash" }]);
+
+    const partial = client({ deleteAssets: vi.fn().mockResolvedValue({ completedIds: ["path:a.stl"], error: failure }) });
+    const partialHook = await loadedHook(partial);
+    await act(async () => { expect(await partialHook.result.current.deleteAssets([partialHook.result.current.assets[0]!, secondRow])).toBe(false); });
+    expect(sent(partial)).toEqual([{ name: "asset_trash" }]);
+
+    const zero = client({ deleteAssets: vi.fn().mockResolvedValue({ completedIds: [], error: failure }) });
+    const zeroHook = await loadedHook(zero);
+    await act(async () => { expect(await zeroHook.result.current.deleteAssets(zeroHook.result.current.assets)).toBe(false); });
+    expect(sent(zero)).toEqual([]);
+
+    const rejected = client({ deleteAssets: vi.fn().mockRejectedValue(failure) });
+    const rejectedHook = await loadedHook(rejected);
+    await act(async () => { expect(await rejectedHook.result.current.deleteAssets(rejectedHook.result.current.assets)).toBe(false); });
+    expect(sent(rejected)).toEqual([]);
+  });
+
+  it("sends asset_open, asset_reveal and path_copy (both copy actions) after success and nothing on failure", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    for (const action of ["open", "reveal", "copyFullPath", "copyRelativePath"] as const) {
+      await act(async () => { expect(await result.current.performAction(result.current.assets[0]!, action)).toBe(true); });
+    }
+    expect(sent(api)).toEqual([{ name: "asset_open" }, { name: "asset_reveal" }, { name: "path_copy" }, { name: "path_copy" }]);
+
+    const failing = client({ performAction: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    await act(async () => { expect(await other.result.current.performAction(other.result.current.assets[0]!, "open")).toBe(false); });
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends library_add only when the library list grows, and never library_switch for it", async () => {
+    const api = client({ choose: vi.fn().mockResolvedValue(bothLibraries) });
+    const { result } = await loadedHook(api);
+    await act(() => result.current.chooseLibrary());
+    expect(result.current.library?.id).toBe("root2");
+    expect(sent(api)).toEqual([{ name: "library_add" }]);
+
+    const cancelled = client({ choose: vi.fn().mockResolvedValue(null) });
+    const cancelledHook = await loadedHook(cancelled);
+    await act(() => cancelledHook.result.current.chooseLibrary());
+    expect(sent(cancelled)).toEqual([]);
+
+    const already = client({ choose: vi.fn().mockResolvedValue(registered) });
+    const alreadyHook = await loadedHook(already);
+    await act(() => alreadyHook.result.current.chooseLibrary());
+    expect(sent(already)).toEqual([]);
+
+    const failing = client({ choose: vi.fn().mockRejectedValue(failure) });
+    const failingHook = await loadedHook(failing);
+    await act(() => failingHook.result.current.chooseLibrary());
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends library_remove when the list shrinks and nothing on failure", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    await act(() => result.current.removeLibrary("root1"));
+    expect(sent(api)).toEqual([{ name: "library_remove" }]);
+
+    const failing = client({ remove: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    await act(() => other.result.current.removeLibrary("root1"));
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends library_switch when another library becomes active and nothing for the same library or a failure", async () => {
+    const api = client({ load: vi.fn().mockResolvedValue(bothLibraries), activate: vi.fn(async (id: string) => ({ ...bothLibraries, activeLibraryId: id })) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(() => result.current.activateLibrary("root1"));
+    expect(sent(api)).toEqual([{ name: "library_switch" }]);
+    await act(() => result.current.activateLibrary("root1"));
+    expect(sent(api)).toEqual([{ name: "library_switch" }]);
+
+    const failing = client({ activate: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    await act(() => other.result.current.activateLibrary("root2"));
+    expect(sent(failing)).toEqual([]);
+  });
+
+  it("sends theme_change with the committed theme and nothing when the save fails", async () => {
+    const api = client();
+    const { result } = await loadedHook(api);
+    await act(async () => { expect(await result.current.setTheme("coral")).toBe(true); });
+    expect(sent(api)).toEqual([{ name: "theme_change", theme: "coral" }]);
+
+    const failing = client({ setTheme: vi.fn().mockRejectedValue(failure) });
+    const other = await loadedHook(failing);
+    await act(async () => { expect(await other.result.current.setTheme("coral")).toBe(false); });
+    expect(sent(failing)).toEqual([]);
+  });
+});
+
+describe("library_scanned", () => {
+  it("is sent once per library per launch with the size range, even after a rescan or a return to that library", async () => {
+    const api = client({
+      load: vi.fn().mockResolvedValue({ ...bothLibraries, activeLibraryId: "root1", usage: sharing }),
+      activate: vi.fn(async (id: string) => ({ ...bothLibraries, activeLibraryId: id, usage: sharing })),
+    });
+    const { result } = await loadedHook(api);
+    expect(sent(api)).toEqual([{ name: "library_scanned", size_range: "under_100" }]);
+    await act(() => result.current.rescan());
+    expect(api.scan).toHaveBeenCalledTimes(2);
+    expect(sent(api)).toHaveLength(1);
+    await act(() => result.current.activateLibrary("root2"));
+    await waitFor(() => expect(sent(api).filter((event) => event.name === "library_scanned")).toHaveLength(2));
+    await act(() => result.current.activateLibrary("root1"));
+    await waitFor(() => expect(api.scan).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(result.current.scanning).toBe(false));
+    expect(sent(api).filter((event) => event.name === "library_scanned")).toHaveLength(2);
+  });
+
+  it("maps the scanned row count to a size range", async () => {
+    const rows = Array.from({ length: 150 }, (_, index) => ({ ...scanResult.assets[0]!, id: `path:${index}.stl`, relativePath: `${index}.stl` }));
+    const api = client({
+      load: vi.fn().mockResolvedValue({ ...registered, usage: sharing }),
+      scan: vi.fn(async (libraryId, scanId) => ({ ...scanResult, libraryId, scanId, assets: rows })),
+    });
+    renderHook(() => useLibrary(api));
+    await waitFor(() => expect(sent(api)).toEqual([{ name: "library_scanned", size_range: "100_1k" }]));
+  });
+
+  it("is not marked while undecided: a scan then sends nothing, and the next completed scan after opting in sends one", async () => {
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, usage: undecided }) });
+    const { result } = await loadedHook(api);
+    expect(sent(api)).toEqual([]);
+    await act(() => result.current.rescan());
+    expect(sent(api)).toEqual([]);
+    vi.mocked(api.setUsageConsent).mockResolvedValue({ status: "saved", usage: sharing });
+    await act(async () => { await result.current.setUsageConsent("granted"); });
+    expect(result.current.state.usage).toEqual(sharing);
+    expect(sent(api)).toEqual([]);
+    await act(() => result.current.rescan());
+    expect(sent(api)).toEqual([{ name: "library_scanned", size_range: "under_100" }]);
+    await act(() => result.current.rescan());
+    expect(sent(api)).toHaveLength(1);
+  });
+
+  it("is not sent when the scan fails", async () => {
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, usage: sharing }), scan: vi.fn().mockRejectedValue(failure) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.error).toEqual(failure));
+    expect(sent(api)).toEqual([]);
+  });
+});
+
+describe("setUsageConsent", () => {
+  it("reaches native while a scan is pending without restarting the scan", async () => {
+    const pendingScan = deferred<ScanResult>();
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, usage: sharing }), scan: vi.fn(() => pendingScan.promise) });
+    const { result } = renderHook(() => useLibrary(api));
+    await waitFor(() => expect(result.current.scanning).toBe(true));
+    let outcome!: Awaited<ReturnType<typeof result.current.setUsageConsent>>;
+    await act(async () => { outcome = await result.current.setUsageConsent("declined"); });
+    expect(api.setUsageConsent).toHaveBeenCalledExactlyOnceWith("declined");
+    expect(outcome).toEqual({ status: "saved", usage: notSharing });
+    expect(result.current.state.usage).toEqual(notSharing);
+    expect(api.scan).toHaveBeenCalledTimes(1);
+    expect(result.current.scanning).toBe(true);
+    await act(async () => { pendingScan.resolve({ ...scanResult, scanId: vi.mocked(api.scan).mock.calls[0]![1] }); });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(api.scan).toHaveBeenCalledTimes(1);
+  });
+
+  it("reaches native while the operation lock is held by another native operation", async () => {
+    const pendingEdit = deferred<(typeof scanResult.assets)[number]>();
+    const api = client({ editTags: vi.fn(() => pendingEdit.promise) });
+    const { result } = await loadedHook(api);
+    let edit!: Promise<boolean>;
+    act(() => { edit = result.current.editTags(result.current.assets[0]!, ["x"], []); });
+    expect(result.current.editingAssetId).toBe("path:a.stl");
+    await act(async () => { await result.current.setUsageConsent("declined"); });
+    expect(api.setUsageConsent).toHaveBeenCalledExactlyOnceWith("declined");
+    expect(result.current.editingAssetId).toBe("path:a.stl");
+    await act(async () => { pendingEdit.resolve({ ...scanResult.assets[0]!, tags: ["x"] }); expect(await edit).toBe(true); });
+    expect(result.current.editingAssetId).toBeNull();
+  });
+
+  it("sends one native call for a double click: the second call reports busy and the first result stands", async () => {
+    const pending = deferred<UsageConsentResultValue>();
+    const api = client({ setUsageConsent: vi.fn(() => pending.promise) });
+    const { result } = await loadedHook(api);
+    let first!: Promise<UsageConsentResultValue>;
+    let again!: Promise<UsageConsentResultValue>;
+    act(() => {
+      first = result.current.setUsageConsent("granted");
+      again = result.current.setUsageConsent("granted");
+    });
+    expect(result.current.savingUsage).toBe(true);
+    expect(await again).toEqual({ status: "busy" });
+    expect(api.setUsageConsent).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve({ status: "saved", usage: sharing }); expect(await first).toEqual({ status: "saved", usage: sharing }); });
+    expect(result.current.savingUsage).toBe(false);
+    expect(result.current.state.usage).toEqual(sharing);
+    expect(api.setUsageConsent).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges a stoppedNotSaved result and lets a later library switch carry native's value", async () => {
+    const api = client({
+      load: vi.fn().mockResolvedValue({ ...registered, usage: sharing }),
+      setUsageConsent: vi.fn().mockResolvedValue({ status: "stoppedNotSaved", reason: "busy", usage: stoppedUsage }),
+      activate: vi.fn().mockResolvedValue({ ...registered, usage: sharing }),
+    });
+    const { result } = await loadedHook(api);
+    await act(async () => { expect(await result.current.setUsageConsent("declined")).toEqual({ status: "stoppedNotSaved", reason: "busy", usage: stoppedUsage }); });
+    expect(result.current.state.usage).toEqual({ available: true, consent: "declined", saved: false });
+    expect(result.current.error).toBeNull();
+    await act(() => result.current.activateLibrary("root1"));
+    expect(result.current.state.usage).toEqual(sharing);
+  });
+
+  it.each([
+    ["busy", { status: "busy" } as const],
+    ["failed", { status: "failed" } as const],
+  ])("leaves usage unchanged for a %s result", async (_name, outcome) => {
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, usage: sharing }), setUsageConsent: vi.fn().mockResolvedValue(outcome) });
+    const { result } = await loadedHook(api);
+    const before = result.current.state.usage;
+    await act(async () => { expect(await result.current.setUsageConsent("declined")).toEqual(outcome); });
+    expect(result.current.state.usage).toBe(before);
+    expect(result.current.state.usage).toEqual(sharing);
+  });
+
+  it("keeps a saved decline when a later Turn on comes back busy", async () => {
+    const setUsageConsent = vi.fn<LibraryClient["setUsageConsent"]>()
+      .mockResolvedValueOnce({ status: "saved", usage: notSharing })
+      .mockResolvedValueOnce({ status: "busy" });
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, usage: undecided }), setUsageConsent });
+    const { result } = await loadedHook(api);
+    await act(async () => { await result.current.setUsageConsent("declined"); });
+    expect(result.current.state.usage).toEqual({ available: true, consent: "declined", saved: true });
+    await act(async () => { expect(await result.current.setUsageConsent("granted")).toEqual({ status: "busy" }); });
+    expect(result.current.state.usage).toEqual({ available: true, consent: "declined", saved: true });
+  });
+
+  it("turns a rejected invoke into a failed result without usage", async () => {
+    const api = client({ load: vi.fn().mockResolvedValue({ ...registered, usage: sharing }), setUsageConsent: vi.fn().mockRejectedValue(failure) });
+    const { result } = await loadedHook(api);
+    let outcome!: UsageConsentResultValue;
+    await act(async () => { outcome = await result.current.setUsageConsent("declined"); });
+    expect(outcome).toEqual({ status: "failed" });
+    expect(outcome.usage).toBeUndefined();
+    expect(result.current.state.usage).toEqual(sharing);
+    expect(result.current.savingUsage).toBe(false);
+    // The lock was released: the next call reaches native again.
+    await act(async () => { await result.current.setUsageConsent("declined"); });
+    expect(api.setUsageConsent).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["saved", { status: "saved", usage: notSharing } as UsageConsentResultValue],
+    ["busy", { status: "busy" } as UsageConsentResultValue],
+    ["failed", { status: "failed" } as UsageConsentResultValue],
+    ["stoppedNotSaved", { status: "stoppedNotSaved", reason: "failed", usage: stoppedUsage } as UsageConsentResultValue],
+  ])("never sets the global error for a %s result", async (_name, outcome) => {
+    const api = client({ setUsageConsent: vi.fn().mockResolvedValue(outcome) });
+    const { result } = await loadedHook(api);
+    await act(async () => { await result.current.setUsageConsent("declined"); });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("never sets the global error for a rejected invoke", async () => {
+    const api = client({ setUsageConsent: vi.fn().mockRejectedValue(failure) });
+    const { result } = await loadedHook(api);
+    await act(async () => { await result.current.setUsageConsent("declined"); });
+    expect(result.current.error).toBeNull();
+  });
+});
+type UsageConsentResultValue = Awaited<ReturnType<LibraryClient["setUsageConsent"]>>;
