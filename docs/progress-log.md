@@ -485,3 +485,26 @@ Deployed `tag-asset-manager-usage` from commit `6675c52`, which adds the custom-
   - Workers Logs, Traces and Issues are disabled;
   - `workers.dev` is disabled.
 - **Unexplained traffic:** the dashboard counted about 250 invocations in the first hours, far more than the test requests. These are probably scanners that found the new hostname through certificate transparency logs; this wasn't verified. Anything off-list gets 404, 405 or 400 and is not forwarded.
+
+### macOS native proof (T18, 2026-11-11 to 2026-11-12)
+
+Run at commit `d1ccb48` on macOS (Apple Silicon). There were three release builds, all with the test identifier `com.tagbasedassetmanager.usagecheck`:
+- one sending to a local listener at `https://127.0.0.1:9443/v1/events`, which logs every connection attempt and then closes it, so TLS fails;
+- one with no endpoint;
+- one with the real endpoint.
+
+The libraries were disposable copies on a scratch disk image, and the first launch used settings in the v0.7.1 shape. The account owner clicked through most checks; the final replay was driven through macOS accessibility scripting. Afterwards the test app data, caches, disk image and builds were removed. The real `com.tagbasedassetmanager.desktop` data was never touched.
+
+- **First ask and upgrade:** the dialog appeared on v0.7.1-shape settings, with the design's text. A click outside was ignored, and Escape saved `declined` with no ID. Libraries and theme were kept, and the dialog didn't appear after relaunch.
+- **No connections without consent:** with the choice undecided, after declining, and after opting out, there were 0 connections across navigating folders, sorting, clicking a tag and editing a tag. Opting in, the positive control, connected at once. Each tracked action then opened one connection. TLS failing never caused an error or a hang.
+- **Opt-in after a decline, and off then on:** each opt-in sent `app_open` and stored a new client ID. The topbar showed On, and "Local files · sharing usage data" replaced the offline dot.
+- **Opt-out not saved:**
+  - With the app-data folder read-only, Turn off stopped sending at once. The dialog showed the not-saved message, with Save "off" in Turn off's position, and the topbar read "Usage data: Off (not saved)".
+  - A repeated Save "off" showed the message again. Settings still held `granted`, and there were 0 connections.
+  - After write access was restored, Save "off" saved `declined` with no ID. After relaunch, sharing stayed off.
+- **Long operation:** Validate ran on a library of 300,000 empty files. During it, Turn off showed the "another action is running" not-saved message. A double-click and repeated Enter on Save "off" never turned sharing on, and nothing connected. After Validate, Save "off" saved and survived a relaunch. The window stayed responsive.
+- **Single instance:** `open -n` while running, including while minimized, left one process. The second launch handed over to the running app, and the window came forward and was restored from the Dock.
+- **Layout at 820×600:** the dialog and its messages fit. The first run found Save "off" half hidden below the dialog's scroll area after a repeated failure; this is fixed in `d1ccb48` and was confirmed on screen. The focus ring touches the dialog's bottom edge, which is cosmetic.
+- **VoiceOver at 820 px with a large library scanning:** the title, body, Currently line and each message were read. The saved choice was announced once ("Usage data is off."). A caption once read "In dialog, content is empty", probably an empty wrapper; no content was missed.
+- **No-endpoint build:** no dialog and no Usage data control, even while undecided. `strings` finds no usage host in the binary.
+- **Real-endpoint build:** GA Realtime showed `app_open`, `folder_navigate`, `sort_change`, `tag_filter_click`, `tag_edit`, `theme_change`, `search_used`, `library_switch` and `library_scanned`, with `edition` = github and the common params, and the search text was not sent. A `wrangler tail` replay confirmed every request reached the Worker and got 204 (the tail output was deleted, because it holds the client IP). Some events showed in Realtime minutes after they were sent, so a quick Realtime look can undercount.
