@@ -1,4 +1,5 @@
 use crate::manifest;
+use crate::usage::{self, UsageConsent};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,7 +8,7 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard, PoisonError, TryLockError,
     },
     time::SystemTime,
 };
@@ -128,6 +129,19 @@ pub struct LibraryState {
     pub saved_searches: Vec<SavedSearch>,
     #[serde(default)]
     pub theme: AppTheme,
+    #[serde(default)]
+    pub usage: UsageSummary,
+}
+
+/// Usage sharing as the UI should show it. `consent` is the effective choice:
+/// `declined` while sharing is stopped but the opt-out isn't saved, which is
+/// also the only case where `saved` is false. The client ID is never here.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummary {
+    pub available: bool,
+    pub consent: UsageConsent,
+    pub saved: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -240,8 +254,57 @@ struct PersistedSettings {
     saved_searches: Vec<SavedSearch>,
     #[serde(default)]
     theme: AppTheme,
+    #[serde(default, deserialize_with = "lenient_usage_consent")]
+    usage_consent: UsageConsent,
+    #[serde(
+        default,
+        deserialize_with = "lenient_usage_client_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    usage_client_id: Option<String>,
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Reads the whole value first, so an unrecognized consent (another version's
+/// format, `null`, a number or an object) loads as undecided instead of
+/// making the settings file unreadable.
+fn lenient_usage_consent<'de, D>(deserializer: D) -> Result<UsageConsent, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// A non-string ID counts as no ID.
+fn lenient_usage_client_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(id) => Ok(Some(id)),
+        _ => Ok(None),
+    }
+}
+
+/// `granted` needs a canonical lowercase UUID, or it loads as undecided and
+/// nothing is sent. An ID stored with any other choice is dropped.
+fn normalize_usage(
+    consent: UsageConsent,
+    client_id: Option<String>,
+) -> (UsageConsent, Option<String>) {
+    match consent {
+        UsageConsent::Granted => match client_id.filter(|id| is_canonical_uuid(id)) {
+            Some(id) => (UsageConsent::Granted, Some(id)),
+            None => (UsageConsent::Undecided, None),
+        },
+        other => (other, None),
+    }
+}
+
+fn is_canonical_uuid(id: &str) -> bool {
+    Uuid::parse_str(id).is_ok_and(|parsed| parsed.hyphenated().to_string() == id)
 }
 
 #[derive(Clone)]
@@ -254,6 +317,10 @@ struct Inner {
     active_library_id: Option<String>,
     saved_searches: Vec<SavedSearch>,
     theme: AppTheme,
+    usage_consent: UsageConsent,
+    usage_client_id: Option<String>,
+    /// "Stopped, not saved", shared with `UsageState`.
+    usage_stopped: Arc<AtomicBool>,
     settings_extra: BTreeMap<String, serde_json::Value>,
     startup_issue: Option<AppError>,
     scan_snapshots: HashMap<String, EditSnapshot>,
@@ -310,6 +377,8 @@ impl BackendState {
         let mut active_library_id = None;
         let mut saved_searches = Vec::new();
         let mut theme = AppTheme::default();
+        let mut usage_consent = UsageConsent::default();
+        let mut usage_client_id = None;
         let mut settings_extra = BTreeMap::new();
         let mut startup_issue = None;
         if let Some(parent) = settings_path.parent() {
@@ -342,6 +411,8 @@ impl BackendState {
                     active_library_id = settings.active_library_id;
                     saved_searches = settings.saved_searches;
                     theme = settings.theme;
+                    (usage_consent, usage_client_id) =
+                        normalize_usage(settings.usage_consent, settings.usage_client_id);
                     settings_extra = settings.extra;
                 }
                 Ok(_) => {
@@ -375,6 +446,9 @@ impl BackendState {
                 active_library_id,
                 saved_searches,
                 theme,
+                usage_consent,
+                usage_client_id,
+                usage_stopped: Arc::new(AtomicBool::new(false)),
                 settings_extra,
                 startup_issue,
                 scan_snapshots: HashMap::new(),
@@ -397,53 +471,161 @@ impl BackendState {
             active_library_id: inner.active_library_id.clone(),
             saved_searches: inner.saved_searches.clone(),
             theme: inner.theme,
+            usage: usage_summary(&inner),
         })
     }
 
     fn mutate<T>(&self, f: impl FnOnce(&mut Inner) -> Result<T, String>) -> CommandResult<T> {
-        let mut inner = self
+        let inner = self
             .inner
             .lock()
             .map_err(|_| AppError::from("Library state unavailable"))?;
-        if let Some(issue) = &inner.startup_issue {
-            return Err(issue.clone());
-        }
-        // Tag-rename invalidation hook: runs at entry under the guard, so failed or rolled-back mutations also stale previews.
-        inner.rename.note_mutation();
-        let previous_libraries = inner.libraries.clone();
-        let previous_active = inner.active_library_id.clone();
-        let previous_searches = inner.saved_searches.clone();
-        let previous_theme = inner.theme;
-        let previous_extra = inner.settings_extra.clone();
-        let value = match f(&mut inner) {
-            Ok(value) => value,
-            Err(error) => {
-                inner.libraries = previous_libraries;
-                inner.active_library_id = previous_active;
-                inner.saved_searches = previous_searches;
-                inner.theme = previous_theme;
-                inner.settings_extra = previous_extra;
-                return Err(AppError::from(error));
+        update_locked(inner, |inner| f(inner).map(SettingsChange::Changed))
+    }
+
+    /// Like `mutate`, but never waits: `None` means another operation holds
+    /// the lock and nothing was changed. The closure may report `Unchanged`,
+    /// which skips the write.
+    fn try_update<T>(
+        &self,
+        f: impl FnOnce(&mut Inner) -> Result<SettingsChange<T>, String>,
+    ) -> Option<CommandResult<T>> {
+        let inner = match self.inner.try_lock() {
+            Ok(inner) => inner,
+            Err(TryLockError::WouldBlock) => return None,
+            Err(TryLockError::Poisoned(_)) => {
+                return Some(Err(AppError::from("Library state unavailable")))
             }
         };
-        if let Err(error) = persist(&inner) {
-            inner.libraries = previous_libraries;
-            inner.active_library_id = previous_active;
-            inner.saved_searches = previous_searches;
-            inner.theme = previous_theme;
-            inner.settings_extra = previous_extra;
-            return Err(AppError::save(&inner.settings_path, error));
-        }
-        let approved: HashMap<_, _> = inner
-            .libraries
-            .iter()
-            .map(|library| (library.id.clone(), PathBuf::from(&library.root_path)))
-            .collect();
-        inner
-            .scan_snapshots
-            .retain(|id, snapshot| approved.get(id) == Some(&snapshot.root));
-        Ok(value)
+        Some(update_locked(inner, f))
     }
+
+    /// The stored usage choice and ID, for startup.
+    pub(crate) fn usage_settings(&self) -> (UsageConsent, Option<String>) {
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        (inner.usage_consent, inner.usage_client_id.clone())
+    }
+
+    /// The "stopped, not saved" flag, shared with `UsageState`.
+    pub(crate) fn usage_stop_flag(&self) -> Arc<AtomicBool> {
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(&inner.usage_stopped)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn current_state(&self) -> CommandResult<LibraryState> {
+        self.snapshot()
+    }
+
+    /// Holds the backend lock on another thread until the returned value is dropped.
+    #[cfg(test)]
+    pub(crate) fn hold_lock_for_test(&self) -> LockHold {
+        let (ready, is_ready) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let inner = Arc::clone(&self.inner);
+        let thread = std::thread::spawn(move || {
+            let _guard = inner.lock();
+            let _ = ready.send(());
+            let _ = released.recv();
+        });
+        is_ready.recv().unwrap();
+        LockHold {
+            release: Some(release),
+            thread: Some(thread),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct LockHold {
+    release: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(test)]
+impl Drop for LockHold {
+    fn drop(&mut self) {
+        drop(self.release.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// What a settings closure did: `Unchanged` skips the write.
+enum SettingsChange<T> {
+    Changed(T),
+    Unchanged(T),
+}
+
+/// The persisted fields, captured before a change so a failed closure or a
+/// failed write can put them back.
+struct PersistedFields {
+    libraries: Vec<LibrarySummary>,
+    active_library_id: Option<String>,
+    saved_searches: Vec<SavedSearch>,
+    theme: AppTheme,
+    usage_consent: UsageConsent,
+    usage_client_id: Option<String>,
+    settings_extra: BTreeMap<String, serde_json::Value>,
+}
+
+impl PersistedFields {
+    fn capture(inner: &Inner) -> Self {
+        Self {
+            libraries: inner.libraries.clone(),
+            active_library_id: inner.active_library_id.clone(),
+            saved_searches: inner.saved_searches.clone(),
+            theme: inner.theme,
+            usage_consent: inner.usage_consent,
+            usage_client_id: inner.usage_client_id.clone(),
+            settings_extra: inner.settings_extra.clone(),
+        }
+    }
+
+    fn restore(self, inner: &mut Inner) {
+        inner.libraries = self.libraries;
+        inner.active_library_id = self.active_library_id;
+        inner.saved_searches = self.saved_searches;
+        inner.theme = self.theme;
+        inner.usage_consent = self.usage_consent;
+        inner.usage_client_id = self.usage_client_id;
+        inner.settings_extra = self.settings_extra;
+    }
+}
+
+/// The one body shared by `mutate` and `try_update`.
+fn update_locked<T>(
+    mut inner: MutexGuard<'_, Inner>,
+    f: impl FnOnce(&mut Inner) -> Result<SettingsChange<T>, String>,
+) -> CommandResult<T> {
+    if let Some(issue) = &inner.startup_issue {
+        return Err(issue.clone());
+    }
+    // Tag-rename invalidation hook: runs at entry under the guard, so failed or rolled-back mutations also stale previews.
+    inner.rename.note_mutation();
+    let previous = PersistedFields::capture(&inner);
+    let value = match f(&mut inner) {
+        Ok(SettingsChange::Changed(value)) => value,
+        Ok(SettingsChange::Unchanged(value)) => return Ok(value),
+        Err(error) => {
+            previous.restore(&mut inner);
+            return Err(AppError::from(error));
+        }
+    };
+    if let Err(error) = persist(&inner) {
+        previous.restore(&mut inner);
+        return Err(AppError::save(&inner.settings_path, error));
+    }
+    let approved: HashMap<_, _> = inner
+        .libraries
+        .iter()
+        .map(|library| (library.id.clone(), PathBuf::from(&library.root_path)))
+        .collect();
+    inner
+        .scan_snapshots
+        .retain(|id, snapshot| approved.get(id) == Some(&snapshot.root));
+    Ok(value)
 }
 
 fn persist(inner: &Inner) -> Result<(), String> {
@@ -453,6 +635,8 @@ fn persist(inner: &Inner) -> Result<(), String> {
         active_library_id: inner.active_library_id.clone(),
         saved_searches: inner.saved_searches.clone(),
         theme: inner.theme,
+        usage_consent: inner.usage_consent,
+        usage_client_id: inner.usage_client_id.clone(),
         extra: inner.settings_extra.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
@@ -591,6 +775,7 @@ pub async fn choose_library(
                 active_library_id: inner.active_library_id.clone(),
                 saved_searches: inner.saved_searches.clone(),
                 theme: inner.theme,
+                usage: usage_summary(inner),
             })
         })
         .map(Some)
@@ -615,6 +800,7 @@ pub fn activate_library(
             active_library_id: inner.active_library_id.clone(),
             saved_searches: inner.saved_searches.clone(),
             theme: inner.theme,
+            usage: usage_summary(inner),
         })
     })
 }
@@ -642,6 +828,7 @@ fn remove_library_domain(state: &BackendState, library_id: &str) -> CommandResul
             active_library_id: inner.active_library_id.clone(),
             saved_searches: inner.saved_searches.clone(),
             theme: inner.theme,
+            usage: usage_summary(inner),
         })
     })
 }
@@ -652,6 +839,73 @@ fn search_state(inner: &Inner) -> LibraryState {
         active_library_id: inner.active_library_id.clone(),
         saved_searches: inner.saved_searches.clone(),
         theme: inner.theme,
+        usage: usage_summary(inner),
+    }
+}
+
+fn usage_summary(inner: &Inner) -> UsageSummary {
+    let not_saved =
+        inner.usage_consent == UsageConsent::Granted && inner.usage_stopped.load(Ordering::SeqCst);
+    UsageSummary {
+        available: usage::sharing_available(),
+        consent: if not_saved {
+            UsageConsent::Declined
+        } else {
+            inner.usage_consent
+        },
+        saved: !not_saved,
+    }
+}
+
+/// A saved consent change, or the current state when nothing changed.
+pub(crate) struct ConsentSaved {
+    pub(crate) changed: bool,
+    pub(crate) state: LibraryState,
+    /// Set only when sharing was turned on: the new ID for `UsageState`.
+    pub(crate) new_client_id: Option<String>,
+}
+
+pub(crate) enum ConsentWrite {
+    Saved(ConsentSaved),
+    /// Another operation held the lock; nothing changed.
+    Busy,
+    /// The choice was rejected or the write failed; nothing changed.
+    Failed,
+}
+
+/// Saves the usage choice in one non-blocking settings update. Turning sharing
+/// on always stores a new ID; turning it off removes the ID. Asking for the
+/// choice that is both stored and in effect writes nothing.
+pub(crate) fn set_usage_consent_domain(
+    state: &BackendState,
+    requested: UsageConsent,
+) -> ConsentWrite {
+    if requested == UsageConsent::Undecided {
+        // Only on or off can be saved; "undecided" is never written.
+        return ConsentWrite::Failed;
+    }
+    let outcome = state.try_update(|inner| {
+        if requested == inner.usage_consent && requested == usage_summary(inner).consent {
+            return Ok(SettingsChange::Unchanged(ConsentSaved {
+                changed: false,
+                state: search_state(inner),
+                new_client_id: None,
+            }));
+        }
+        let new_client_id =
+            (requested == UsageConsent::Granted).then(|| Uuid::new_v4().to_string());
+        inner.usage_consent = requested;
+        inner.usage_client_id = new_client_id.clone();
+        Ok(SettingsChange::Changed(ConsentSaved {
+            changed: true,
+            state: search_state(inner),
+            new_client_id,
+        }))
+    });
+    match outcome {
+        None => ConsentWrite::Busy,
+        Some(Ok(saved)) => ConsentWrite::Saved(saved),
+        Some(Err(_)) => ConsentWrite::Failed,
     }
 }
 
@@ -3473,5 +3727,296 @@ mod tests {
         assert!(result.issues.iter().any(|i| i.message.contains("symlink")));
         assert!(!result.assets.iter().any(|a| a.relative_path == "link"));
         assert!(path_string(Path::new("../sibling")).is_none());
+    }
+
+    // ---- Usage consent persistence (usage analytics T7) ----
+
+    use crate::usage::UsageConsent;
+
+    const STORED_ID: &str = "3f2b8c1e-5d4a-4b6f-9e2d-1a7c0b9e8f61";
+
+    fn usage_settings_file(dir: &Path, usage_fields: &str) -> PathBuf {
+        let settings = dir.join("settings.json");
+        let library_root = dir.join("library");
+        fs::create_dir_all(&library_root).unwrap();
+        let body = format!(
+            r#"{{"version":{SETTINGS_VERSION},"libraries":[{{"id":"lib","name":"Library","rootPath":{root},"assetCount":0,"lastScanAt":null}}],"activeLibraryId":"lib","future":8{usage_fields}}}"#,
+            root = serde_json::to_string(library_root.to_str().unwrap()).unwrap(),
+        );
+        fs::write(&settings, body).unwrap();
+        settings
+    }
+
+    fn loaded_usage(usage_fields: &str) -> (tempfile::TempDir, PathBuf, BackendState) {
+        let dir = tempdir().unwrap();
+        let settings = usage_settings_file(dir.path(), usage_fields);
+        let state = BackendState::load(settings.clone()).unwrap();
+        (dir, settings, state)
+    }
+
+    fn saved_json(settings: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(settings).unwrap()).unwrap()
+    }
+
+    fn saved(write: ConsentWrite) -> ConsentSaved {
+        match write {
+            ConsentWrite::Saved(saved) => saved,
+            ConsentWrite::Busy => panic!("expected a saved write, got busy"),
+            ConsentWrite::Failed => panic!("expected a saved write, got failed"),
+        }
+    }
+
+    #[test]
+    fn usage_legacy_settings_load_as_undecided() {
+        let (_dir, _settings, state) = loaded_usage("");
+        assert_eq!(state.usage_settings(), (UsageConsent::Undecided, None));
+        let library_state = state.current_state().unwrap();
+        assert_eq!(library_state.libraries.len(), 1);
+        assert_eq!(library_state.usage.consent, UsageConsent::Undecided);
+        assert!(library_state.usage.saved);
+    }
+
+    #[test]
+    fn usage_granted_without_a_valid_id_loads_as_undecided() {
+        for fields in [
+            r#","usageConsent":"granted""#,
+            r#","usageConsent":"granted","usageClientId":"not-a-uuid""#,
+            r#","usageConsent":"granted","usageClientId":"3F2B8C1E-5D4A-4B6F-9E2D-1A7C0B9E8F61""#,
+            r#","usageConsent":"granted","usageClientId":{"x":1}"#,
+            r#","usageConsent":"granted","usageClientId":["a"]"#,
+            r#","usageConsent":"granted","usageClientId":123"#,
+        ] {
+            let (_dir, _settings, state) = loaded_usage(fields);
+            assert_eq!(
+                state.usage_settings(),
+                (UsageConsent::Undecided, None),
+                "{fields}"
+            );
+            assert_eq!(
+                state.current_state().unwrap().libraries.len(),
+                1,
+                "{fields}"
+            );
+        }
+    }
+
+    #[test]
+    fn usage_granted_with_a_valid_id_loads_as_granted() {
+        let (_dir, _settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"granted","usageClientId":"{STORED_ID}""#
+        ));
+        assert_eq!(
+            state.usage_settings(),
+            (UsageConsent::Granted, Some(STORED_ID.to_string()))
+        );
+    }
+
+    #[test]
+    fn usage_unrecognized_or_wrongly_typed_values_never_make_settings_unreadable() {
+        for fields in [
+            r#","usageConsent":"paused""#,
+            r#","usageConsent":null"#,
+            r#","usageConsent":5"#,
+            r#","usageConsent":true"#,
+            r#","usageConsent":{"a":1}"#,
+            r#","usageConsent":["granted"]"#,
+            r#","usageConsent":{"choice":"granted","at":"2030-01-01"},"usageClientId":{"x":1}"#,
+        ] {
+            let (_dir, settings, state) = loaded_usage(fields);
+            assert_eq!(
+                state.usage_settings(),
+                (UsageConsent::Undecided, None),
+                "{fields}"
+            );
+            assert_eq!(
+                state.current_state().unwrap().libraries.len(),
+                1,
+                "{fields}"
+            );
+            saved(set_usage_consent_domain(&state, UsageConsent::Declined));
+            let json = saved_json(&settings);
+            assert_eq!(json["future"], 8, "{fields}");
+            assert_eq!(json["usageConsent"], "declined", "{fields}");
+        }
+    }
+
+    #[test]
+    fn usage_declined_with_a_non_string_id_stays_declined() {
+        let (_dir, _settings, state) =
+            loaded_usage(r#","usageConsent":"declined","usageClientId":123"#);
+        assert_eq!(state.usage_settings(), (UsageConsent::Declined, None));
+        let (_dir, settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"declined","usageClientId":"{STORED_ID}""#
+        ));
+        assert_eq!(state.usage_settings(), (UsageConsent::Declined, None));
+        saved(set_usage_consent_domain(&state, UsageConsent::Granted));
+        saved(set_usage_consent_domain(&state, UsageConsent::Declined));
+        assert!(saved_json(&settings).get("usageClientId").is_none());
+    }
+
+    #[test]
+    fn usage_writes_keep_unknown_fields_and_store_a_new_id_each_time_sharing_starts() {
+        let (_dir, settings, state) = loaded_usage(r#","usageConsent":"declined""#);
+        let first = saved(set_usage_consent_domain(&state, UsageConsent::Granted));
+        assert!(first.changed);
+        let first_id = first.new_client_id.clone().unwrap();
+        assert!(Uuid::parse_str(&first_id).is_ok());
+        let json = saved_json(&settings);
+        assert_eq!(json["usageConsent"], "granted");
+        assert_eq!(json["usageClientId"], first_id.as_str());
+        assert_eq!(json["future"], 8);
+
+        let declined = saved(set_usage_consent_domain(&state, UsageConsent::Declined));
+        assert!(declined.changed);
+        assert_eq!(declined.new_client_id, None);
+        let json = saved_json(&settings);
+        assert_eq!(json["usageConsent"], "declined");
+        assert!(json.get("usageClientId").is_none());
+
+        let second = saved(set_usage_consent_domain(&state, UsageConsent::Granted));
+        let second_id = second.new_client_id.unwrap();
+        assert_ne!(second_id, first_id);
+        let json = saved_json(&settings);
+        assert_eq!(json["usageConsent"], "granted");
+        assert_eq!(json["usageClientId"], second_id.as_str());
+
+        let reloaded = BackendState::load(settings).unwrap();
+        assert_eq!(
+            reloaded.usage_settings(),
+            (UsageConsent::Granted, Some(second_id))
+        );
+    }
+
+    #[test]
+    fn usage_same_choice_twice_is_unchanged_and_writes_nothing() {
+        let (_dir, settings, state) = loaded_usage("");
+        assert!(saved(set_usage_consent_domain(&state, UsageConsent::Declined)).changed);
+        fs::remove_file(&settings).unwrap();
+        fs::create_dir(&settings).unwrap();
+        let again = saved(set_usage_consent_domain(&state, UsageConsent::Declined));
+        assert!(!again.changed);
+        assert_eq!(again.state.usage.consent, UsageConsent::Declined);
+        assert!(again.state.usage.saved);
+        assert!(settings.is_dir(), "an unchanged choice must not write");
+    }
+
+    #[test]
+    fn usage_undecided_cannot_be_requested() {
+        let (_dir, settings, state) = loaded_usage(r#","usageConsent":"declined""#);
+        let before = fs::read(&settings).unwrap();
+        assert!(matches!(
+            set_usage_consent_domain(&state, UsageConsent::Undecided),
+            ConsentWrite::Failed
+        ));
+        assert_eq!(fs::read(&settings).unwrap(), before);
+        assert_eq!(state.usage_settings(), (UsageConsent::Declined, None));
+    }
+
+    #[test]
+    fn usage_failed_write_restores_the_previous_choice_and_id() {
+        let (_dir, settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"granted","usageClientId":"{STORED_ID}""#
+        ));
+        fs::remove_file(&settings).unwrap();
+        fs::create_dir(&settings).unwrap();
+        assert!(matches!(
+            set_usage_consent_domain(&state, UsageConsent::Declined),
+            ConsentWrite::Failed
+        ));
+        assert_eq!(
+            state.usage_settings(),
+            (UsageConsent::Granted, Some(STORED_ID.to_string()))
+        );
+
+        let (_dir, settings, state) = loaded_usage(r#","usageConsent":"declined""#);
+        fs::remove_file(&settings).unwrap();
+        fs::create_dir(&settings).unwrap();
+        assert!(matches!(
+            set_usage_consent_domain(&state, UsageConsent::Granted),
+            ConsentWrite::Failed
+        ));
+        assert_eq!(state.usage_settings(), (UsageConsent::Declined, None));
+    }
+
+    #[test]
+    fn usage_try_update_returns_busy_at_once_while_the_lock_is_held() {
+        let (_dir, settings, state) = loaded_usage(r#","usageConsent":"declined""#);
+        let before = fs::read(&settings).unwrap();
+        let hold = state.hold_lock_for_test();
+        let (done, result) = std::sync::mpsc::channel();
+        let worker = state.clone();
+        std::thread::spawn(move || {
+            let _ = done.send(matches!(
+                set_usage_consent_domain(&worker, UsageConsent::Granted),
+                ConsentWrite::Busy
+            ));
+        });
+        let busy = result
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("try_update must not wait for the lock");
+        assert!(busy);
+        drop(hold);
+        assert_eq!(state.usage_settings(), (UsageConsent::Declined, None));
+        assert_eq!(fs::read(&settings).unwrap(), before);
+    }
+
+    #[test]
+    fn usage_summary_reports_the_effective_choice_while_stopped() {
+        let (_dir, _settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"granted","usageClientId":"{STORED_ID}""#
+        ));
+        let summary = state.current_state().unwrap().usage;
+        assert_eq!(
+            (summary.consent, summary.saved),
+            (UsageConsent::Granted, true)
+        );
+        state
+            .usage_stop_flag()
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let summary = state.current_state().unwrap().usage;
+        assert_eq!(
+            (summary.consent, summary.saved),
+            (UsageConsent::Declined, false)
+        );
+
+        let (_dir, _settings, state) = loaded_usage(r#","usageConsent":"declined""#);
+        state
+            .usage_stop_flag()
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let summary = state.current_state().unwrap().usage;
+        assert_eq!(
+            (summary.consent, summary.saved),
+            (UsageConsent::Declined, true)
+        );
+    }
+
+    #[test]
+    fn usage_granted_over_a_stopped_opt_in_writes_a_new_id() {
+        let (_dir, _settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"granted","usageClientId":"{STORED_ID}""#
+        ));
+        assert!(!saved(set_usage_consent_domain(&state, UsageConsent::Granted)).changed);
+        state
+            .usage_stop_flag()
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let write = saved(set_usage_consent_domain(&state, UsageConsent::Granted));
+        assert!(write.changed);
+        let new_id = write.new_client_id.unwrap();
+        assert_ne!(new_id, STORED_ID);
+        assert_eq!(
+            state.usage_settings(),
+            (UsageConsent::Granted, Some(new_id))
+        );
+    }
+
+    #[test]
+    fn usage_library_state_never_contains_the_client_id() {
+        let (_dir, _settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"granted","usageClientId":"{STORED_ID}""#
+        ));
+        let json = serde_json::to_string(&state.current_state().unwrap()).unwrap();
+        assert!(!json.contains(STORED_ID));
+        assert!(!json.to_ascii_lowercase().contains("clientid"));
+        assert!(json.contains(r#""usage":{"available":"#));
     }
 }

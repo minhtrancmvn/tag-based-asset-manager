@@ -453,3 +453,17 @@ Before any code, a test property (563333501) showed that Google Analytics' stand
 An event sent from Vietnam with `user_location.country_id` set to `JP` showed Japan, with no city, so the country comes from the request body, not the sender's IP address. Retention is 14 months for event and user data, with reset on new activity off. Granular location and device data collection is off.
 
 Wrangler: `4.154.0`, published 2026-10-27, which is at least 14 days before first use on 2026-11-11. It runs through `pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0`, so the app's lockfile doesn't change. pnpm 12 blocks the install scripts of those two dependencies unless they're allowed by name. `deploy --dry-run` bundles the Worker (7.63 KiB) with the rate limit and both variables bound.
+
+### Rust core (2026-11-11)
+
+The usage module (`src-tauri/src/usage.rs`) and the consent setting are in place.
+- **Not active in any build yet.** The frontend doesn't call `track_usage` or `set_usage_consent` yet, and no build carries an endpoint, so nothing is asked or sent.
+- **New dependencies:**
+  - `reqwest` 0.13.5 and `rustls` 0.23.46 are now direct dependencies, at the versions and TLS stack the updater already locks. `Cargo.lock` gains only the two dependency edges and no packages; `cargo tree -i native-tls` and `-i openssl` find nothing.
+  - `tauri-plugin-single-instance` is pinned to `=2.5.5`, published 2026-10-28, with `Cargo.lock` checksum `726b6da0dd5bd1344f84f4108a622c07d01923baacb5c803a605189672c5352f`. The lock diff adds only that crate; its dependencies were already locked. Version 2.5.4 can leave a second process running on Windows.
+- **How the single-instance plugin behaves:**
+  - It is registered first, in release builds only.
+  - It keeps its lock as an app resource and closes it in `cleanup_before_exit`, after `RunEvent::Exit`, which includes the updater's restart.
+  - On Windows that releases and closes the named mutex, and the OS also closes it on any process exit.
+  - On macOS it removes `/tmp/<identifier>_si.sock`. A socket left by a crash is cleared on the next launch when the connection is refused.
+- **Tests:** strict Clippy (debug and `--release`) and 328 Rust tests pass, 1 ignored, on macOS.

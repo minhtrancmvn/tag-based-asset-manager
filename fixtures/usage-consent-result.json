@@ -1,0 +1,13 @@
+{
+  "saved": {
+    "status": "saved",
+    "usage": { "available": false, "consent": "declined", "saved": true }
+  },
+  "busy": { "status": "busy" },
+  "failed": { "status": "failed" },
+  "stoppedNotSaved": {
+    "status": "stoppedNotSaved",
+    "usage": { "available": true, "consent": "declined", "saved": false },
+    "reason": "busy"
+  }
+}

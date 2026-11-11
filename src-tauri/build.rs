@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=TAURI_UPDATER_PUBLIC_KEY");
+    println!("cargo:rerun-if-env-changed=TAG_ASSET_MANAGER_USAGE_ENDPOINT");
 
     let mut attributes = tauri_build::Attributes::new();
     if is_windows_msvc() {
