@@ -9,6 +9,11 @@ name = "tag-asset-manager-usage"
 main = "src/worker.mjs"
 compatibility_date = "2026-10-20"
 workers_dev = false
+# Custom domain on the owner's own Cloudflare zone (minhtran.id.vn). Cloudflare creates
+# the DNS record and certificate; the hostname must not already have a DNS record.
+routes = [
+  { pattern = "usage.minhtran.id.vn", custom_domain = true },
+]
 
 [observability]
 enabled = false
