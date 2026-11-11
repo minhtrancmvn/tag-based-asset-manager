@@ -467,3 +467,21 @@ The usage module (`src-tauri/src/usage.rs`) and the consent setting are in place
   - On Windows that releases and closes the named mutex, and the OS also closes it on any process exit.
   - On macOS it removes `/tmp/<identifier>_si.sock`. A socket left by a crash is cleared on the next launch when the connection is refused.
 - **Tests:** strict Clippy (debug and `--release`) and 328 Rust tests pass, 1 ignored, on macOS.
+
+### Usage Worker deployment (2026-11-11)
+
+Deployed `tag-asset-manager-usage` from commit `6675c52`, which adds the custom-domain route. It went to the owner's own Cloudflare account through Wrangler 4.154.0, with Wrangler telemetry off. Version: `78a9259e-5a41-45ae-ab7c-7c3240906c18`. Live checks against `https://usage.minhtran.id.vn/v1/events`:
+
+- **Rejections:**
+  - GET returns 405;
+  - another path returns 404;
+  - an off-list event returns 400, and so does an allowlisted event with an extra param;
+  - all with empty bodies.
+- **Delivery:** fixture bodies return 204 and appear in GA Realtime with the right event names and Location Vietnam, from a Vietnamese network: `tag_edit` from the fixture, and a test client sending `app_open`, `folder_navigate`, `tag_edit`, `theme_change` and `library_scanned`. `/debug/mp/collect` accepts all 26 fixture bodies in the Worker's outbound shape, with consent DENIED and `user_location`. The Realtime user snapshot showed only the first event of the test client, while "Event count by Event name" listed all of them, so user snapshots are not a complete record.
+- **Kill switch:** with `FORWARD = "off"` deployed, a fixture `sort_change` returned 204 and never reached Realtime, and an invalid body still returned 400. Then `"on"` was redeployed.
+- **No client IP reaches the upstream.** A throwaway Worker sent a request the same way, with only `content-type`, to a header echo, with and without spoofed client-IP headers. It received no `cf-connecting-ip`, `x-real-ip`, `x-forwarded-for`, `true-client-ip` or `forwarded` header. The test machine's address appeared nowhere, and the echo saw a Cloudflare address. Cloudflare adds its own `cf-ray` (with a data-center code), `cf-worker`, `cf-visitor`, `cf-ew-via` and `cdn-loop` headers, none of them an address. The throwaway Worker was deleted.
+- **Configuration:**
+  - the rate limit binding (600 requests per 60 s, namespace 7301) deployed on the account's plan;
+  - Workers Logs, Traces and Issues are disabled;
+  - `workers.dev` is disabled.
+- **Unexplained traffic:** the dashboard counted about 250 invocations in the first hours, far more than the test requests. These are probably scanners that found the new hostname through certificate transparency logs; this wasn't verified. Anything off-list gets 404, 405 or 400 and is not forwarded.
