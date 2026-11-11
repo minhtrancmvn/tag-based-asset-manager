@@ -113,16 +113,15 @@ export function UsageConsentDialog({ mode, usage, saving, message, onChoose, onC
     }
     if (saving || handledAttempt.current === attempt) return;
     handledAttempt.current = attempt;
-    if (first) {
-      closeRef.current?.focus();
-    } else if (messageId === "stoppedBusy" || messageId === "stoppedFailed") {
-      firstChoiceRef.current?.focus();
-    } else {
-      const pressed = pressedRef.current;
-      if (!pressed) return;
-      if (document.activeElement !== pressed) pressed.focus();
-      pressed.scrollIntoView?.({ block: "nearest" });
-    }
+    const target = first
+      ? closeRef.current
+      : messageId === "stoppedBusy" || messageId === "stoppedFailed"
+        ? firstChoiceRef.current
+        : pressedRef.current;
+    if (!target) return;
+    if (document.activeElement !== target) target.focus();
+    // The new message can push the buttons below the dialog's scroll area at the 820×600 minimum window.
+    target.scrollIntoView?.({ block: "nearest" });
   }, [attempt, messageId, first, saving]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>): void {

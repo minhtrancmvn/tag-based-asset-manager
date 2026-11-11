@@ -2984,6 +2984,36 @@ describe("usage consent review", () => {
       expect(scrollIntoView.mock.contexts).toContain(turnOn);
     });
 
+    it("scrolls Save \"off\" into view after each stopped-not-saved result, including a repeat", async () => {
+      // Native acceptance at 820×600 found the buttons half hidden after a repeated failure.
+      const mocks = usageMocks({ status: "stoppedNotSaved", reason: "failed", usage: notSavedUsage });
+      const { dialog } = await openReview(notSavedUsage, mocks);
+      const saveOff = within(dialog).getByRole("button", { name: 'Save "off"' });
+      saveOff.focus();
+      scrollIntoView.mockClear();
+      await click(saveOff);
+      const focused = within(dialog).getByRole("button", { name: 'Save "off"' });
+      expect(document.activeElement).toBe(focused);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(scrollIntoView.mock.contexts).toContain(focused);
+      scrollIntoView.mockClear();
+      await click(focused);
+      expect(scrollIntoView.mock.contexts).toContain(within(dialog).getByRole("button", { name: 'Save "off"' }));
+    });
+
+    it("scrolls Close into view when the first ask can't save", async () => {
+      const mocks = usageMocks({ status: "busy" });
+      setUsage({ usage: undecidedUsage, mocks });
+      render(<App />);
+      const dialog = firstAskDialog();
+      scrollIntoView.mockClear();
+      await click(within(dialog).getByRole("button", { name: "No thanks" }));
+      const close = within(dialog).getByRole("button", { name: "Close" });
+      expect(document.activeElement).toBe(close);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(scrollIntoView.mock.contexts).toContain(close);
+    });
+
     it("also scrolls it into view when focus had moved away from the pressed button", async () => {
       const mocks = usageMocks({ status: "failed" });
       const { dialog } = await openReview(offUsage, mocks);
