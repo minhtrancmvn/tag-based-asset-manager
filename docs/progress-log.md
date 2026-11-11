@@ -437,3 +437,19 @@ Not done: Partner Center upload and certification; the GitHub NSIS installer and
 2026-11-08: the first Partner Center upload of `0.6.0.0` (Store package run 42420532367 on `eb420bc`) failed package acceptance: "The PublisherDisplayName element in the app manifest of Tag-Based-Asset-Manager_0.6.0.0_x64.msix is Minh Tran, which doesn't match your publisher display name: kaishj91." The name `Minh Tran` is taken in Partner Center, so the manifest now uses `kaishj91`, the account's publisher display name. The rebuilt `0.6.0.0` package (Store package run 42422444473 on PR #17) passed Partner Center's upload validation, as reported by the account owner. Certification is pending.
 
 2026-11-09: Submission 1 (`0.6.0.0`, Store package run 42422444473) passed Microsoft certification and is published on the Microsoft Store, as reported by the account owner. The Store copy updates only through new submissions; GitHub releases after `0.6.0` (currently `0.7.0`) do not reach Store users until a higher version is submitted.
+
+## Usage analytics: shared contract and Worker (2026-11-11)
+
+Branch `feature/usage-analytics` adds opt-in usage analytics, as specified in [the design](design/usage-analytics.md) and [the ADR](../adr/usage-analytics.md). Nothing is sent unless the user opts in. This first wave adds:
+- the shared allowlist `usage-events.json`;
+- one golden request body per event in `fixtures/usage-payload.json`;
+- the Cloudflare Worker in `usage-proxy/`, which validates each event and forwards it to Google Analytics without the user's IP address or headers.
+
+Before any code, a test property (563333501) showed that Google Analytics' standard reports work for Measurement Protocol events:
+- event count, users, sessions and country;
+- every custom dimension;
+- device category and operating system.
+
+An event sent from Vietnam with `user_location.country_id` set to `JP` showed Japan, with no city, so the country comes from the request body, not the sender's IP address. Retention is 14 months for event and user data, with reset on new activity off. Granular location and device data collection is off.
+
+Wrangler: `4.154.0`, published 2026-10-27, which is at least 14 days before first use on 2026-11-11. It runs through `pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0`, so the app's lockfile doesn't change. pnpm 12 blocks the install scripts of those two dependencies unless they're allowed by name. `deploy --dry-run` bundles the Worker (7.63 KiB) with the rate limit and both variables bound.

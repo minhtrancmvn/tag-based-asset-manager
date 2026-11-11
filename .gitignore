@@ -15,6 +15,10 @@ coverage
 *.tsbuildinfo
 .claude/worktrees/
 
+# Cloudflare Worker local state and secrets (usage-proxy)
+.wrangler/
+.dev.vars
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
