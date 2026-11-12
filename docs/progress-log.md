@@ -496,7 +496,7 @@ Run at commit `d1ccb48` on macOS (Apple Silicon). There were three release build
 The libraries were disposable copies on a scratch disk image, and the first launch used settings in the v0.7.1 shape. The account owner clicked through most checks; the final replay was driven through macOS accessibility scripting. Afterwards the test app data, caches, disk image and builds were removed. The real `com.tagbasedassetmanager.desktop` data was never touched.
 
 - **First ask and upgrade:** the dialog appeared on v0.7.1-shape settings, with the design's text. A click outside was ignored, and Escape saved `declined` with no ID. Libraries and theme were kept, and the dialog didn't appear after relaunch.
-- **No connections without consent:** with the choice undecided, after declining, and after opting out, there were 0 connections across navigating folders, sorting, clicking a tag and editing a tag. Opting in, the positive control, connected at once. Each tracked action then opened one connection. TLS failing never caused an error or a hang.
+- **No connections without consent:** after declining and after opting out, there were 0 connections across navigating folders, sorting, clicking a tag and editing a tag. While undecided (from launch to the answer, and through a failed first-ask save) there were 0 connections too, but no tracked actions were done in that state. Opting in, the positive control, connected at once. Each tracked action then opened one connection. TLS failing never caused an error or a hang.
 - **Opt-in after a decline, and off then on:** each opt-in sent `app_open` and stored a new client ID. The topbar showed On, and "Local files · sharing usage data" replaced the offline dot.
 - **Opt-out not saved:**
   - With the app-data folder read-only, Turn off stopped sending at once. The dialog showed the not-saved message, with Save "off" in Turn off's position, and the topbar read "Usage data: Off (not saved)".
@@ -508,3 +508,48 @@ The libraries were disposable copies on a scratch disk image, and the first laun
 - **VoiceOver at 820 px with a large library scanning:** the title, body, Currently line and each message were read. The saved choice was announced once ("Usage data is off."). A caption once read "In dialog, content is empty", probably an empty wrapper; no content was missed.
 - **No-endpoint build:** no dialog and no Usage data control, even while undecided. `strings` finds no usage host in the binary.
 - **Real-endpoint build:** GA Realtime showed `app_open`, `folder_navigate`, `sort_change`, `tag_filter_click`, `tag_edit`, `theme_change`, `search_used`, `library_switch` and `library_scanned`, with `edition` = github and the common params, and the search text was not sent. A `wrangler tail` replay confirmed every request reached the Worker and got 204 (the tail output was deleted, because it holds the client IP). Some events showed in Realtime minutes after they were sent, so a quick Realtime look can undercount.
+
+### Independent review (T19, 2026-11-12)
+
+Three reviewers (config safety, silent failures and a skeptical senior review) read `52f7f75`, and all three approved. The fixes:
+
+- **Worker:**
+  - the kill switch forwards only when `FORWARD` is exactly `on` (before, anything but `off` forwarded, including a missing value);
+  - it answers 503 when `GA_API_SECRET` is missing or empty or `GA_MEASUREMENT_ID` isn't a `G-` ID, and 415 for any content type other than `application/json`;
+  - `preview_urls = false`, with comments on why observability stays off and what a rollback restores.
+- **Allowlist only grows:** `usage-events.v1.json` freezes the first published list, and a Worker test checks the current list still contains all of it.
+- **App:**
+  - turning sharing off, or saving a decline, aborts requests already in progress;
+  - the HTTP client follows no redirects and is HTTPS only;
+  - native update installation refuses while an opt-out isn't saved (before, only the UI blocked it);
+  - a test pins the app version to the Worker's `x.y.z` pattern;
+  - asset actions map to events through an exhaustive switch;
+  - consent buttons scroll with room for the focus ring.
+- **Release guard:** checks GitHub repository ID 1405177639 and uses the name only when no ID is set, so a rename can't turn the check off.
+- **Docs:** the runbook's status table, a rotation step that confirms the new secret in GA Realtime before deleting the old one, a rollback warning, a post-release check, the dev-build wording, known limits, the test plan's Result cells and `.gitignore` entries for Worker env files.
+
+Deferred:
+- **VoiceOver caption "In dialog, content is empty" (K6, U2):** the cause is unverified, and the proposed fix (clearing the live region on a timer, or one always-mounted status area) changes design decision U5-6. Revisit it with a native VoiceOver trace.
+- **Failed consent saves discard the error details (S3):** showing them is a UI change beyond the design. Revisit if a save failure is reported.
+- **Fork pull requests (C10):** whether repository variables reach `store-msix.yml` builds of fork pull requests is unverified.
+
+ADR decision 9 and the design say development builds stay silent. That is true only when they're compiled without the endpoint variable. Both files are hash-bound to the consultation's verdict, so the correction is in [usage analytics](usage-analytics.md) and `CLAUDE.md` instead.
+
+Test events in the production GA property, for annotations (times are UTC+7; client IDs are the random test IDs' first 8 characters):
+
+| When | What | Client |
+|---|---|---|
+| 2026-11-09 | GA setup checks (S0); time not recorded | test |
+| 2026-11-11, about 11:30 | location check through `user_location` (Japan) | test |
+| 2026-11-11, 14:43 to 14:54 | Worker deployment checks with the fixture events | `6db6f1e8` |
+| 2026-11-12, 01:27 to 01:48 | real-endpoint build (T18) and its replay | `98dce666`, `ef3dc59d` |
+
+Treat the first release date as the start of real reporting.
+
+Verification at the fix commit:
+- `cargo fmt --check`, and Clippy with `-D warnings` on debug and release, all targets, pass;
+- `cargo test`: 332 passed, 1 ignored;
+- Vitest: 1045 tests in 25 files pass, and the type check and production build pass;
+- Node: 206 Worker and script tests pass, and `actionlint` is clean.
+
+The Worker checks (T17) and the macOS native proof (T18) must be repeated at this commit, because the Worker and the app both changed.

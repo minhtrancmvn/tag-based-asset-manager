@@ -143,6 +143,7 @@ describe("body cap", () => {
     const chunk = new TextEncoder().encode("x".repeat(3000));
     const req = new Request(URL_EVENTS, {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: new ReadableStream({
         start(c) {
           for (let i = 0; i < 4; i += 1) c.enqueue(chunk);
@@ -575,9 +576,107 @@ describe("FORWARD switch", () => {
     assert.equal(limitCalls.length, 0);
   });
 
-  it("forwards for any value other than off", async () => {
+  it("forwards only when FORWARD is exactly on", async () => {
     await worker.fetch(post(base()), makeEnv({ FORWARD: "on" }));
     assert.equal(fetchCalls.length, 1);
+  });
+
+  // Fail closed: a typo, a deleted line or a new environment without vars must stop data, not keep it flowing.
+  for (const value of [undefined, "", "Off", "OFF", "false", "off ", "ON", "yes"]) {
+    it(`drops valid events with 204 when FORWARD is ${JSON.stringify(value)}`, async () => {
+      const env = makeEnv();
+      if (value === undefined) delete env.FORWARD;
+      else env.FORWARD = value;
+      const res = await worker.fetch(post(base()), env);
+      assert.equal(res.status, 204);
+      assert.equal(await res.text(), "");
+      assert.equal(fetchCalls.length, 0);
+      assert.equal(limitCalls.length, 0);
+    });
+  }
+});
+
+describe("configuration check", () => {
+  // GA answers 2xx even for a wrong or missing secret, so a missing secret must not look like success.
+  const broken = {
+    "a missing secret": (env) => { delete env.GA_API_SECRET; },
+    "an empty secret": (env) => { env.GA_API_SECRET = ""; },
+    "a missing measurement ID": (env) => { delete env.GA_MEASUREMENT_ID; },
+    "a malformed measurement ID": (env) => { env.GA_MEASUREMENT_ID = "UA-123"; },
+  };
+  for (const [name, breakEnv] of Object.entries(broken)) {
+    it(`answers 503 without calling the limiter or GA for ${name}`, async () => {
+      const env = makeEnv();
+      breakEnv(env);
+      const res = await worker.fetch(post(base()), env);
+      assert.equal(res.status, 503);
+      assert.equal(await res.text(), "");
+      assert.equal(fetchCalls.length, 0);
+      assert.equal(limitCalls.length, 0);
+    });
+  }
+
+  it("still drops with 204 when FORWARD is off, even without a secret", async () => {
+    const env = makeEnv({ FORWARD: "off" });
+    delete env.GA_API_SECRET;
+    const res = await worker.fetch(post(base()), env);
+    assert.equal(res.status, 204);
+    assert.equal(fetchCalls.length, 0);
+  });
+
+  it("still rejects invalid bodies with 400 before the configuration check", async () => {
+    const env = makeEnv();
+    delete env.GA_API_SECRET;
+    await expectRejected(post("{bad"), 400, env);
+  });
+});
+
+describe("content type", () => {
+  // Requiring JSON forces a CORS preflight, which this Worker never answers, so web pages can't send events.
+  for (const type of ["text/plain", "text/plain;charset=UTF-8", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", ""]) {
+    it(`answers 415 without forwarding for content type ${JSON.stringify(type)}`, async () => {
+      await expectRejected(post(base(), { headers: { "content-type": type } }), 415);
+    });
+  }
+
+  it("answers 415 when the content type header is absent", async () => {
+    const req = new Request(URL_EVENTS, { method: "POST", body: JSON.stringify(base()) });
+    req.headers.delete("content-type");
+    await expectRejected(req, 415);
+  });
+
+  it("accepts application/json with parameters and any letter case", async () => {
+    for (const type of ["application/json; charset=utf-8", "Application/JSON"]) {
+      fetchCalls.length = 0;
+      const res = await worker.fetch(post(base(), { headers: { "content-type": type } }), makeEnv());
+      assert.equal(res.status, 204, type);
+      assert.equal(fetchCalls.length, 1, type);
+    }
+  });
+});
+
+describe("allowlist only grows", () => {
+  // Installed copies keep sending what they shipped with, so nothing in the frozen baseline may disappear.
+  const baseline = JSON.parse(readFileSync(new URL("../usage-events.v1.json", import.meta.url), "utf8"));
+  for (const key of ["events", "themes", "sizeRanges", "editions", "operatingSystems", "commonParams"]) {
+    it(`keeps every baseline value of ${key}`, () => {
+      const missing = baseline[key].filter((value) => !spec[key].includes(value));
+      assert.deepEqual(missing, [], `removed from usage-events.json ${key}`);
+    });
+  }
+
+  it("keeps every baseline extra param mapping", () => {
+    for (const [name, param] of Object.entries(baseline.extraParams)) {
+      assert.equal(spec.extraParams[name], param, name);
+    }
+  });
+
+  it("accepts every baseline event body the Worker accepted before", async () => {
+    for (const name of baseline.events) {
+      fetchCalls.length = 0;
+      const res = await worker.fetch(post(base(name)), makeEnv());
+      assert.equal(res.status, 204, name);
+    }
   });
 });
 

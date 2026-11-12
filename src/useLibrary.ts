@@ -12,6 +12,20 @@ import type {
 
 const emptyState: LibraryState = { libraries: [], activeLibraryId: null };
 
+/** Exhaustive on purpose: a new AssetAction must be mapped here, or type checking fails. */
+function actionUsageEvent(action: AssetAction): UsageEvent {
+  switch (action) {
+    case "open": return { name: "asset_open" };
+    case "reveal": return { name: "asset_reveal" };
+    case "copyFullPath":
+    case "copyRelativePath": return { name: "path_copy" };
+    default: {
+      const unmapped: never = action;
+      return unmapped;
+    }
+  }
+}
+
 export interface RenamePreviewInput {
   mode: RenameMode;
   /** Raw names as typed; native normalizes them and must agree with the mapping this hook derives. */
@@ -495,7 +509,7 @@ export function useLibrary(client: LibraryClient = nativeClient) {
   const performAction = useCallback(async (asset: Asset, action: AssetAction) => {
     if (asset.status === "missing") return false;
     const succeeded = await runNativeOperation((libraryId) => client.performAction(libraryId, asset.id, action), () => true);
-    if (succeeded) trackUsage({ name: action === "open" ? "asset_open" : action === "reveal" ? "asset_reveal" : "path_copy" });
+    if (succeeded) trackUsage(actionUsageEvent(action));
     return succeeded;
   }, [client, runNativeOperation, trackUsage]);
   const validateMetadata = useCallback(() => runNativeOperation((libraryId) => client.validateMetadata(libraryId), (report, libraryId) => {

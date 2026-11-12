@@ -17,7 +17,8 @@ coverage
 
 # Cloudflare Worker local state and secrets (usage-proxy)
 .wrangler/
-.dev.vars
+.dev.vars*
+usage-proxy/.env*
 
 # Editor directories and files
 .vscode/*

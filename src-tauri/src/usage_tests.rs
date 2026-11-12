@@ -1210,3 +1210,56 @@ fn opting_back_in_after_a_real_stop_reports_granted_and_saved() {
     );
     expect_quiet(&h.sent);
 }
+
+// ---- T19 review fixes ----
+
+/// K2: a request already being sent (here: held at the send gate, after the
+/// client was cached) must not complete after the user opts out.
+fn send_held_in_progress() -> (
+    UsageCore<FakePlatform>,
+    mpsc::Receiver<Value>,
+    mpsc::Sender<()>,
+) {
+    let (core, sent, _) = fake_core(Some(ENDPOINT));
+    core.start(ID_A.to_string());
+    assert_eq!(sent_name(&expect_sent(&sent)), "app_open");
+    wait_until(|| core.in_flight() == 0);
+    let release = core.shared.platform.gate_sends();
+    core.record(&tag_edit());
+    wait_until(|| core.shared.platform.send_attempts.load(Ordering::SeqCst) == 2);
+    assert_eq!(core.in_flight(), 1);
+    (core, sent, release)
+}
+
+#[test]
+fn stop_aborts_a_send_already_in_progress() {
+    let (core, sent, release) = send_held_in_progress();
+    core.stop();
+    wait_until(|| core.in_flight() == 0);
+    release.send(()).unwrap();
+    expect_quiet(&sent);
+}
+
+#[test]
+fn a_saved_decline_aborts_a_send_already_in_progress() {
+    let (core, sent, release) = send_held_in_progress();
+    core.mark_declined();
+    wait_until(|| core.in_flight() == 0);
+    release.send(()).unwrap();
+    expect_quiet(&sent);
+}
+
+/// S7/K10: the Worker accepts only x.y.z versions, so a prerelease version
+/// would make every event a 400.
+#[test]
+fn app_version_matches_the_workers_version_pattern() {
+    let version = env!("CARGO_PKG_VERSION");
+    let parts: Vec<&str> = version.split('.').collect();
+    assert_eq!(parts.len(), 3, "{version}");
+    assert!(
+        parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())),
+        "{version}"
+    );
+}

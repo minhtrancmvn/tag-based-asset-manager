@@ -257,7 +257,12 @@ pub(crate) async fn build_client() -> Result<reqwest::Client, reqwest::Error> {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
-    reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build()
+    // No redirects and HTTPS only: the event body never follows a redirect elsewhere.
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(true)
+        .build()
 }
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
@@ -355,6 +360,9 @@ struct CoreState<C> {
     throttled_at: HashMap<&'static str, Instant>,
     session: Option<Session>,
     client: Option<C>,
+    /// Send tasks that may still be running; opting out aborts them, so a
+    /// request still being set up never completes after the user said no.
+    tasks: Vec<tauri::async_runtime::JoinHandle<()>>,
 }
 
 struct Session {
@@ -407,6 +415,7 @@ impl<P: UsagePlatform> UsageCore<P> {
                     client_id: None,
                     generation: 0,
                     throttled_at: HashMap::new(),
+                    tasks: Vec::new(),
                     session: None,
                     client: None,
                 }),
@@ -454,14 +463,18 @@ impl<P: UsagePlatform> UsageCore<P> {
     /// because nothing on disk has changed yet.
     pub(crate) fn stop(&self) {
         self.shared.stopped.store(true, Ordering::SeqCst);
-        let mut state = self.shared.lock_state();
-        state.generation = state.generation.wrapping_add(1);
-        state.client = None;
+        let tasks = {
+            let mut state = self.shared.lock_state();
+            state.generation = state.generation.wrapping_add(1);
+            state.client = None;
+            std::mem::take(&mut state.tasks)
+        };
+        abort_all(tasks);
     }
 
     /// A saved decline: forget the ID and clear the stopped flag.
     pub(crate) fn mark_declined(&self) {
-        {
+        let tasks = {
             let mut state = self.shared.lock_state();
             state.consent = UsageConsent::Declined;
             state.client_id = None;
@@ -469,7 +482,9 @@ impl<P: UsagePlatform> UsageCore<P> {
             state.client = None;
             state.throttled_at.clear();
             state.session = None;
-        }
+            std::mem::take(&mut state.tasks)
+        };
+        abort_all(tasks);
         self.shared.stopped.store(false, Ordering::SeqCst);
     }
 
@@ -535,9 +550,17 @@ impl<P: UsagePlatform> UsageCore<P> {
             return;
         };
         let shared = Arc::clone(&self.shared);
-        tauri::async_runtime::spawn(async move {
+        let task = tauri::async_runtime::spawn(async move {
             shared.send(slot, generation, endpoint, body).await;
         });
+        let mut state = self.shared.lock_state();
+        state.tasks.retain(|running| !running.inner().is_finished());
+        if state.generation == generation {
+            state.tasks.push(task);
+        } else {
+            // An opt-out ran between recording and spawning: cancel at once.
+            task.abort();
+        }
     }
 
     #[cfg(test)]
@@ -548,6 +571,14 @@ impl<P: UsagePlatform> UsageCore<P> {
     #[cfg(test)]
     fn has_client(&self) -> bool {
         self.shared.lock_state().client.is_some()
+    }
+}
+
+/// Cancels send tasks. Aborting drops each task's future, which also frees its
+/// in-flight slot, so nothing still being set up reaches the network afterwards.
+fn abort_all(tasks: Vec<tauri::async_runtime::JoinHandle<()>>) {
+    for task in tasks {
+        task.abort();
     }
 }
 

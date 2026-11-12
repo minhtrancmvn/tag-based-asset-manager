@@ -11,9 +11,9 @@ React UI -- track_usage(closed enum) --> Rust usage.rs -- HTTPS, one event, no s
 ```
 
 - The choice is stored in the app's own settings (`usageConsent`: `undecided`, `granted` or `declined`; `usageClientId`: a random UUID that exists only while granted). Undecided, declined and a dismissed dialog all send nothing.
-- Each event goes out on its own as soon as it happens. There is no queue and no batching.
+- Each event goes out on its own as soon as it happens. There is no queue and no batching. Turning sharing off, or saving "No thanks", stops sending at once and cancels any request still in progress.
 - The Worker in `usage-proxy/` accepts `POST /v1/events` with exactly one event, checks every name, parameter and value against `usage-events.json`, and builds a fresh request to the Google Analytics Measurement Protocol with only a `content-type` header. The app's IP address and headers are never forwarded. The Worker adds the country from Cloudflare's own lookup as `user_location.country_id` and sends `consent` with `ad_user_data` and `ad_personalization` set to `DENIED`.
-- The endpoint is compiled in from `TAG_ASSET_MANAGER_USAGE_ENDPOINT`. Builds without it (forks, `pnpm tauri dev`) never ask and never send. The official value is `https://usage.minhtran.id.vn/v1/events`.
+- The endpoint is compiled in from `TAG_ASSET_MANAGER_USAGE_ENDPOINT`. Builds compiled without it never ask and never send: forks, and `pnpm tauri dev` unless the variable is set in that shell. A dev build compiled with it does ask and send, shares the installed GitHub copy's settings file and has no single-instance lock, so give it a separate identifier with `--config`. The official value is `https://usage.minhtran.id.vn/v1/events`.
 - Both editions (GitHub and Microsoft Store) behave the same. They keep separate settings, so each has its own choice and its own random ID. The `edition` parameter tells them apart.
 
 Every event carries `session_id`, `engagement_time_msec`, `app_version`, `edition` (`github` or `store`) and `operating_system` (`macOS`, `Windows` or `Linux`), plus the device category `desktop`.
@@ -90,12 +90,25 @@ Worker settings are in `usage-proxy/wrangler.toml`:
 | Worker name | `tag-asset-manager-usage` |
 | Public hostname | `usage.minhtran.id.vn` |
 | `GA_MEASUREMENT_ID` | `G-3R72WXR2D5` |
-| `FORWARD` | `on` (kill switch, see below) |
+| `FORWARD` | `on`. Kill switch, see below: only the exact value `on` forwards |
 | Rate limit | `USAGE_RATE_LIMIT`, 600 requests per 60 seconds on one fixed key, approximate and per location |
-| `workers_dev` | `false` |
-| Observability | off; the Worker has no `console` calls and logs nothing |
+| `workers_dev`, `preview_urls` | both `false` |
+| Observability | off, because incoming requests carry client IPs and the outbound request URL carries the `api_secret`. The Worker has no `console` calls and logs nothing |
 
-The Worker answers 204 for an accepted (or dropped) event, 400 for anything off-list or malformed, 404 for another path, 405 for another method, 413 for a body over 8 KiB, 429 when the rate limit refuses it and 502 when Google can't be reached or refuses the event. The app drops any failed event and doesn't retry. The Free plan allows 100,000 requests a day.
+The Worker answers:
+
+| Status | When |
+|---|---|
+| 204 | a valid event was forwarded and Google answered 2xx, or the kill switch dropped it |
+| 400 | anything off-list or malformed |
+| 404, 405 | another path or another method |
+| 413 | a body over 8 KiB |
+| 415 | a content type other than `application/json` |
+| 429 | the rate limit refused it |
+| 502 | Google couldn't be reached or answered with a non-2xx status |
+| 503 | the Worker isn't configured: `GA_API_SECRET` is missing or empty, or `GA_MEASUREMENT_ID` isn't a `G-` ID |
+
+Google's `/mp/collect` answers 2xx even for a wrong or revoked secret, so a 204 doesn't prove the event was counted. Only GA Realtime does. The app drops any failed event and doesn't retry. The Free plan allows 100,000 requests a day.
 
 ### Deploy the Worker
 
@@ -113,17 +126,27 @@ Run `wrangler login` first in your own terminal (`pnpm dlx --allow-build=esbuild
 pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0 secret put GA_API_SECRET --config usage-proxy/wrangler.toml
 ```
 
-To rotate: create a new Measurement Protocol API secret on the GA web stream, run the command above with the new value, send one test event, then delete the old secret in GA. The secret lives only in the Worker, so rotating needs no app release.
+To rotate:
+
+1. Create a new Measurement Protocol API secret on the GA web stream.
+2. Run the command above with the new value.
+3. Send one valid event from `fixtures/usage-payload.json` and confirm it in GA Realtime. It can take a few minutes to show. A wrong secret still gets 204, so Realtime is the only check that the new value works.
+4. Only then delete the old secret in GA. Until you do, putting the old value back undoes a bad rotation.
+
+The secret lives only in the Worker, so rotating needs no app release.
 
 ### Stop data reaching Google (kill switch)
 
-Set `FORWARD = "off"` in `usage-proxy/wrangler.toml` and deploy. The Worker still validates every event (an invalid one still gets 400) and answers 204 for the valid ones, but forwards nothing. Set it back to `"on"` and deploy to resume. Installed copies can't be told to stop calling the Worker; this switch stops the data reaching Google instead. Change the value in the file, not only in the Cloudflare dashboard, or the next deploy overwrites it.
+Set `FORWARD = "off"` in `usage-proxy/wrangler.toml` and deploy. Only the exact value `"on"` forwards; any other value, or a missing `FORWARD`, also stops forwarding, so a typo fails closed. The Worker still validates every event (an invalid one still gets 400) and answers 204 for the valid ones, but forwards nothing, even with no secret set. Set it back to `"on"` and deploy to resume. Installed copies can't be told to stop calling the Worker; this switch stops the data reaching Google instead. Change the value in the file, not only in the Cloudflare dashboard, or the next deploy overwrites it.
 
 ### Roll back a bad deploy
 
 ```sh
-pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0 rollback --config usage-proxy/wrangler.toml
+pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0 versions list --config usage-proxy/wrangler.toml
+pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0 rollback <version-id> --config usage-proxy/wrangler.toml
 ```
+
+Without a version ID, `rollback` picks the version uploaded before the latest one, and every `secret put` makes a new version, so name the version you want. A rollback restores that version's code and `[vars]`, including its `FORWARD` value: rolling back past a kill-switch deploy turns forwarding back on. Whether it also restores an older `GA_API_SECRET` isn't verified. After any rollback, check `FORWARD` in the restored version, send one valid test event and confirm it in GA Realtime. Then make `wrangler.toml` match what's deployed, or the next deploy undoes the rollback.
 
 ### Changing the allowlist
 
@@ -139,6 +162,12 @@ The allowlist (`usage-events.json`) only grows. Never remove or rename an event,
 - The endpoint comes from the repository variable `USAGE_ENDPOINT` (Settings, Secrets and variables, Actions, Variables). It isn't a secret. `release.yml` and `store-msix.yml` pass it to the build as `TAG_ASSET_MANAGER_USAGE_ENDPOINT`.
 - `scripts/check-usage-endpoint.mjs` runs before both builds. In this repository the value must be exactly `https://usage.minhtran.id.vn/v1/events`, and empty fails, so a release can't ship without the dialog the privacy policy describes. In forks the variable is absent and the check passes, so forks stay silent.
 - Date the privacy policy: replace `[release date]` at the top of [privacy-policy.md](privacy-policy.md) with the release date, and paste the same text in the Store submission in Partner Center. Check the listing and age rating answers for "no data collected" claims, which aren't in this repository.
+- After each release, open the new version once with sharing on and confirm its `app_open` shows in GA Realtime with the new `app_version`. Observability is off, so an event the Worker rejects (for example one released before the Worker's allowlist) is otherwise lost without a trace. To see status codes, run `wrangler tail --config usage-proxy/wrangler.toml` in your own terminal and read it on screen only: its output holds client IPs, so don't save, paste or share it.
+
+## Known limits
+
+- **Test events are in the production property.** There's one GA property, and the Worker strips any parameter that could mark an event as a test, so acceptance events can't be filtered out later. The [progress log](progress-log.md) lists their time windows and client IDs; add a GA annotation for each window and treat the first release date as the start of real reporting.
+- **Single instance on macOS isn't per user.** The single-instance plugin's lock socket is in `/tmp`, so with two macOS accounts signed in at once, the second account's copy can run without the lock (a reviewer finding from the plugin source, not tested). Each account has its own settings file, so this doesn't affect anyone's usage choice.
 
 ## Checking nothing is sent without consent
 

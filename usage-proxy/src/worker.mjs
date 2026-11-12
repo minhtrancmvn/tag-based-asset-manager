@@ -15,6 +15,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const SESSION_ID_PATTERN = /^\d{1,20}$/;
 const APP_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
+const MEASUREMENT_ID_PATTERN = /^G-[A-Z0-9]+$/;
 
 class Rejection extends Error {
   constructor(status) {
@@ -34,6 +35,17 @@ function isPlainObject(value) {
 function hasExactKeys(value, keys) {
   const actual = Object.keys(value);
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isJson(request) {
+  const type = request.headers.get("content-type") ?? "";
+  return type.split(";")[0].trim().toLowerCase() === "application/json";
+}
+
+// GA answers 2xx even for a wrong or missing secret, so a misconfigured Worker must not report success.
+function isConfigured(env) {
+  return typeof env.GA_API_SECRET === "string" && env.GA_API_SECRET.length > 0
+    && typeof env.GA_MEASUREMENT_ID === "string" && MEASUREMENT_ID_PATTERN.test(env.GA_MEASUREMENT_ID);
 }
 
 function isMember(set, value) {
@@ -155,6 +167,8 @@ export default {
   async fetch(request, env) {
     if (new URL(request.url).pathname !== "/v1/events") return empty(404);
     if (request.method !== "POST") return empty(405);
+    // Requiring JSON forces a CORS preflight, which is never answered, so web pages can't send events.
+    if (!isJson(request)) return empty(415);
 
     let payload;
     try {
@@ -165,7 +179,9 @@ export default {
     }
     if (payload === null) return empty(400);
 
-    if (env.FORWARD === "off") return empty(204);
+    // Fail closed: anything but an explicit "on" (a typo, a deleted line, a new environment) stops forwarding.
+    if (env.FORWARD !== "on") return empty(204);
+    if (!isConfigured(env)) return empty(503);
 
     let limited;
     try {

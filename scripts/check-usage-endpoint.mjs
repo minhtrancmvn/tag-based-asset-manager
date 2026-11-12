@@ -6,11 +6,19 @@
 import { pathToFileURL } from "node:url";
 
 export const OFFICIAL_REPOSITORY = "minhtrancmvn/tag-based-asset-manager";
+// GitHub's numeric repository ID survives renames and transfers, so it decides
+// which repository is official; the name is only a fallback when no ID is set.
+export const OFFICIAL_REPOSITORY_ID = "1405177639";
 export const OFFICIAL_ENDPOINT = "https://usage.minhtran.id.vn/v1/events";
 
-export function checkUsageEndpoint({ repository, endpoint }) {
+function isOfficial(repository, repositoryId) {
+  if (repositoryId) return String(repositoryId) === OFFICIAL_REPOSITORY_ID;
+  return repository === OFFICIAL_REPOSITORY;
+}
+
+export function checkUsageEndpoint({ repository, repositoryId, endpoint }) {
   const value = endpoint ?? "";
-  if (repository === OFFICIAL_REPOSITORY) {
+  if (isOfficial(repository, repositoryId)) {
     if (value === OFFICIAL_ENDPOINT) return { ok: true, message: "Usage endpoint set for the official build." };
     if (value === "") {
       return { ok: false, message: "TAG_ASSET_MANAGER_USAGE_ENDPOINT is empty. Set the repository variable USAGE_ENDPOINT to the official endpoint." };
@@ -25,6 +33,7 @@ export function checkUsageEndpoint({ repository, endpoint }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = checkUsageEndpoint({
     repository: process.env.GITHUB_REPOSITORY,
+    repositoryId: process.env.GITHUB_REPOSITORY_ID,
     endpoint: process.env.TAG_ASSET_MANAGER_USAGE_ENDPOINT,
   });
   if (result.ok) {

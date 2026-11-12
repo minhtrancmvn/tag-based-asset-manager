@@ -367,6 +367,13 @@ impl BackendState {
         if !inner.scan_cancellations.is_empty() {
             return Err("Stop scans and wait for them to finish before updating".into());
         }
+        // A restart would turn sharing back on, so an unsaved opt-out blocks installation
+        // here too, not only in the UI.
+        if inner.usage_consent == UsageConsent::Granted
+            && inner.usage_stopped.load(Ordering::SeqCst)
+        {
+            return Err("Usage data is off but not saved. Choose Save \"off\" under Usage data first, or sharing will turn back on after the update restarts the app.".into());
+        }
         let result = install();
         drop(inner);
         result
@@ -4007,6 +4014,22 @@ mod tests {
             state.usage_settings(),
             (UsageConsent::Granted, Some(new_id))
         );
+    }
+
+    #[test]
+    fn usage_unsaved_opt_out_blocks_update_install_natively() {
+        // K1: the frontend gate can miss a stop whose invoke was rejected; native must refuse too.
+        let (_dir, _settings, state) = loaded_usage(&format!(
+            r#","usageConsent":"granted","usageClientId":"{STORED_ID}""#
+        ));
+        assert!(state.with_update_install_lock(|| Ok(())).is_ok());
+        state
+            .usage_stop_flag()
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let blocked = state.with_update_install_lock(|| Ok(()));
+        assert!(blocked.unwrap_err().contains("Save \"off\""));
+        saved(set_usage_consent_domain(&state, UsageConsent::Declined));
+        assert!(state.with_update_install_lock(|| Ok(())).is_ok());
     }
 
     #[test]

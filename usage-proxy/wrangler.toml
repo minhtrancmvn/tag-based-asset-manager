@@ -9,17 +9,22 @@ name = "tag-asset-manager-usage"
 main = "src/worker.mjs"
 compatibility_date = "2026-10-20"
 workers_dev = false
+preview_urls = false
 # Custom domain on the owner's own Cloudflare zone (minhtran.id.vn). Cloudflare creates
 # the DNS record and certificate; the hostname must not already have a DNS record.
 routes = [
   { pattern = "usage.minhtran.id.vn", custom_domain = true },
 ]
 
+# Keep observability off: incoming requests carry client IPs, and the outbound
+# request URL carries the GA api_secret in its query string.
 [observability]
 enabled = false
 
 [vars]
 GA_MEASUREMENT_ID = "G-3R72WXR2D5"
+# Kill switch: only the exact value "on" forwards to Google; anything else drops
+# valid events with 204. A rollback restores that version's value too.
 FORWARD = "on"
 
 [[ratelimits]]
