@@ -543,6 +543,8 @@ Test events in the production GA property, for annotations (times are UTC+7; cli
 | 2026-11-11, about 11:30 | location check through `user_location` (Japan) | test |
 | 2026-11-11, 14:43 to 14:54 | Worker deployment checks with the fixture events | `6db6f1e8` |
 | 2026-11-12, 01:27 to 01:48 | real-endpoint build (T18) and its replay | `98dce666`, `ef3dc59d` |
+| 2026-11-12, 10:42 | one fixture `app_open` after the Worker redeploy (T17 re-check) | `7ebfbeda` |
+| 2026-11-12, 11:42 to 11:44 | real-endpoint build (T18 re-run) | `f3814da8` |
 
 Treat the first release date as the start of real reporting.
 
@@ -552,4 +554,32 @@ Verification at the fix commit:
 - Vitest: 1045 tests in 25 files pass, and the type check and production build pass;
 - Node: 206 Worker and script tests pass, and `actionlint` is clean.
 
-The Worker checks (T17) and the macOS native proof (T18) must be repeated at this commit, because the Worker and the app both changed.
+The Worker checks (T17) and the macOS native proof (T18) had to be repeated at this commit, because the Worker and the app both changed. Both are below.
+
+### Worker re-check (T17, 2026-11-12)
+
+The Worker was redeployed from `e7c0d47` (version `cd79f32f`) with the same bindings: `FORWARD` "on", `GA_MEASUREMENT_ID` and the rate limit. Live checks against `usage.minhtran.id.vn`:
+- 415 for a valid body sent as `text/plain`, as curl's default form type and with no content type;
+- 405 for GET, 404 for another path, and 400 for a malformed body and an off-list event;
+- 204 for one valid `app_open` sent as `application/json; charset=utf-8`, and the account owner saw it in GA Realtime.
+
+The strict kill switch and the 503 configuration check are covered by Worker tests only, because checking them live would mean deploying a broken configuration.
+
+### macOS native proof re-run (T18, 2026-11-12)
+
+Run at commit `e7c0d47` on macOS (Apple Silicon), with three release builds under the test identifier `com.tagbasedassetmanager.usagecheck`:
+- one sending to a local listener that logs each connection attempt and closes it, so TLS fails;
+- one with no endpoint;
+- one with the real endpoint.
+
+Disposable libraries (a copy of the sample fixture, 30,000 and 300,000 empty files) were on a scratch disk image. The first launch used v0.7.1-shape settings with a saved search and the Ocean theme. The app was driven through macOS accessibility scripting, and the account owner did the VoiceOver step. Afterwards the test app data, caches, disk image and builds were removed; the real `com.tagbasedassetmanager.desktop` data was never touched. The per-row results are in the [manual test plan](manual-test-plan.md); in short:
+
+- **No connections without consent:** 0 connections while undecided (after a failed first ask and **Close**), after declining, and after opting out, across opening a folder, sorting, clicking a tag and editing a tag. While on, there was one connection per action. Opt-in after a decline, and off then on, each stored a new ID.
+- **Failures and busy states:** all four USAGE-04 cases (No thanks and Turn on, each failed and busy) showed the pressed button and the alert together at 820×600. The keyboard flow, the focus trap and Escape retry behaved as designed. The focus ring now clears the dialog's bottom edge.
+- **Opt-out not saved and long operation:** sending stopped at once while the choice couldn't be saved. During Validate on 300,000 files, a double-click and repeated Enter on **Save "off"** never turned sharing on, and "off" survived a relaunch.
+- **Service down:** with every request failing at TLS, nothing showed an error or hung, 9 sends failed quietly, and quit took 0.4 s.
+- **Single instance, no-endpoint build:** a second launch left one process and restored the minimized window. The no-endpoint build showed no dialog or control and contains no endpoint string.
+- **Real endpoint:** GA Realtime showed `app_open`, `sort_change`, `tag_filter_click` and `theme_change` from client `f3814da8`, and **Turn off** removed the ID.
+- **Not covered:** VoiceOver read the busy review dialog only as "dialog with 11 items"; the account owner accepted this. Open, reveal and copy events weren't driven natively, because a synthetic right-click doesn't open the WebKit context menu; a Vitest test covers all four actions.
+
+An early version of the automation sent one keystroke sequence (a tag name, Return, and a select-all and delete) to whichever app was in front, and VS Code was in front at the time. The tag name arrived as a chat message; no file on disk changed. From then on, every keystroke and click checked first that the test app was in front and stopped the run if it wasn't. The check never fired again.
