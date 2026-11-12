@@ -583,3 +583,15 @@ Disposable libraries (a copy of the sample fixture, 30,000 and 300,000 empty fil
 - **Not covered:** VoiceOver read the busy review dialog only as "dialog with 11 items"; the account owner accepted this. Open, reveal and copy events weren't driven natively, because a synthetic right-click doesn't open the WebKit context menu; a Vitest test covers all four actions.
 
 An early version of the automation sent one keystroke sequence (a tag name, Return, and a select-all and delete) to whichever app was in front, and VS Code was in front at the time. The tag name arrived as a chat message; no file on disk changed. From then on, every keystroke and click checked first that the test app was in front and stopped the run if it wasn't. The check never fired again.
+
+### Full local gates (T20, 2026-11-12)
+
+Run at `7ec1a96` (code unchanged since the proof commit `e7c0d47`), in the plan's order. Every command exited 0:
+- `pnpm build`; `pnpm test`, 1045 tests in 25 files; `node --test` on the script and Worker tests, 206 tests;
+- `cargo fmt --check`; strict Clippy on debug and `--release`, all targets; `cargo test`, 332 passed and 1 ignored, including the three fixture scan tests that fail only in a dirty main checkout;
+- `actionlint` on all workflows;
+- `git diff --exit-code main...HEAD` on `src-tauri/capabilities/default.json` and `src-tauri/tauri.conf.json`: unchanged.
+
+GitNexus was re-indexed first (`CLAUDE.md` and `AGENTS.md` restored byte-for-byte afterwards). `detect_changes` against `main` rates the branch critical: 613 symbols in 45 files and 184 flows, almost all through the shared settings-save path (`load`, `mutate`, `update_locked`, `capture` and `restore`) that Wave 2 rebuilt so consent saves roll back and never block. The Rust suite covers those flows.
+
+Secret scan: the account owner ran a script that read the GA API secret from a hidden prompt and counted it in tracked files, all git history, untracked and ignored files in both checkouts, the last release build, this project's Claude Code transcripts, the session scratchpad, shell history and Wrangler local state. It found 0 matches. A canary run beforehand confirmed the script detects a match.
