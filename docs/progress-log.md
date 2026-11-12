@@ -437,3 +437,161 @@ Not done: Partner Center upload and certification; the GitHub NSIS installer and
 2026-11-08: the first Partner Center upload of `0.6.0.0` (Store package run 42420532367 on `eb420bc`) failed package acceptance: "The PublisherDisplayName element in the app manifest of Tag-Based-Asset-Manager_0.6.0.0_x64.msix is Minh Tran, which doesn't match your publisher display name: kaishj91." The name `Minh Tran` is taken in Partner Center, so the manifest now uses `kaishj91`, the account's publisher display name. The rebuilt `0.6.0.0` package (Store package run 42422444473 on PR #17) passed Partner Center's upload validation, as reported by the account owner. Certification is pending.
 
 2026-11-09: Submission 1 (`0.6.0.0`, Store package run 42422444473) passed Microsoft certification and is published on the Microsoft Store, as reported by the account owner. The Store copy updates only through new submissions; GitHub releases after `0.6.0` (currently `0.7.0`) do not reach Store users until a higher version is submitted.
+
+## Usage analytics: shared contract and Worker (2026-11-11)
+
+Branch `feature/usage-analytics` adds opt-in usage analytics, as specified in [the design](design/usage-analytics.md) and [the ADR](../adr/usage-analytics.md). Nothing is sent unless the user opts in. This first wave adds:
+- the shared allowlist `usage-events.json`;
+- one golden request body per event in `fixtures/usage-payload.json`;
+- the Cloudflare Worker in `usage-proxy/`, which validates each event and forwards it to Google Analytics without the user's IP address or headers.
+
+Before any code, a test property (563333501) showed that Google Analytics' standard reports work for Measurement Protocol events:
+- event count, users, sessions and country;
+- every custom dimension;
+- device category and operating system.
+
+An event sent from Vietnam with `user_location.country_id` set to `JP` showed Japan, with no city, so the country comes from the request body, not the sender's IP address. Retention is 14 months for event and user data, with reset on new activity off. Granular location and device data collection is off.
+
+Wrangler: `4.154.0`, published 2026-10-27, which is at least 14 days before first use on 2026-11-11. It runs through `pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0`, so the app's lockfile doesn't change. pnpm 12 blocks the install scripts of those two dependencies unless they're allowed by name. `deploy --dry-run` bundles the Worker (7.63 KiB) with the rate limit and both variables bound.
+
+### Rust core (2026-11-11)
+
+The usage module (`src-tauri/src/usage.rs`) and the consent setting are in place.
+- **Not active in any build yet.** The frontend doesn't call `track_usage` or `set_usage_consent` yet, and no build carries an endpoint, so nothing is asked or sent.
+- **New dependencies:**
+  - `reqwest` 0.13.5 and `rustls` 0.23.46 are now direct dependencies, at the versions and TLS stack the updater already locks. `Cargo.lock` gains only the two dependency edges and no packages; `cargo tree -i native-tls` and `-i openssl` find nothing.
+  - `tauri-plugin-single-instance` is pinned to `=2.5.5`, published 2026-10-28, with `Cargo.lock` checksum `726b6da0dd5bd1344f84f4108a622c07d01923baacb5c803a605189672c5352f`. The lock diff adds only that crate; its dependencies were already locked. Version 2.5.4 can leave a second process running on Windows.
+- **How the single-instance plugin behaves:**
+  - It is registered first, in release builds only.
+  - It keeps its lock as an app resource and closes it in `cleanup_before_exit`, after `RunEvent::Exit`, which includes the updater's restart.
+  - On Windows that releases and closes the named mutex, and the OS also closes it on any process exit.
+  - On macOS it removes `/tmp/<identifier>_si.sock`. A socket left by a crash is cleared on the next launch when the connection is refused.
+- **Tests:** strict Clippy (debug and `--release`) and 328 Rust tests pass, 1 ignored, on macOS.
+
+### Usage Worker deployment (2026-11-11)
+
+Deployed `tag-asset-manager-usage` from commit `6675c52`, which adds the custom-domain route. It went to the owner's own Cloudflare account through Wrangler 4.154.0, with Wrangler telemetry off. Version: `78a9259e-5a41-45ae-ab7c-7c3240906c18`. Live checks against `https://usage.minhtran.id.vn/v1/events`:
+
+- **Rejections:**
+  - GET returns 405;
+  - another path returns 404;
+  - an off-list event returns 400, and so does an allowlisted event with an extra param;
+  - all with empty bodies.
+- **Delivery:** fixture bodies return 204 and appear in GA Realtime with the right event names and Location Vietnam, from a Vietnamese network: `tag_edit` from the fixture, and a test client sending `app_open`, `folder_navigate`, `tag_edit`, `theme_change` and `library_scanned`. `/debug/mp/collect` accepts all 26 fixture bodies in the Worker's outbound shape, with consent DENIED and `user_location`. The Realtime user snapshot showed only the first event of the test client, while "Event count by Event name" listed all of them, so user snapshots are not a complete record.
+- **Kill switch:** with `FORWARD = "off"` deployed, a fixture `sort_change` returned 204 and never reached Realtime, and an invalid body still returned 400. Then `"on"` was redeployed.
+- **No client IP reaches the upstream.** A throwaway Worker sent a request the same way, with only `content-type`, to a header echo, with and without spoofed client-IP headers. It received no `cf-connecting-ip`, `x-real-ip`, `x-forwarded-for`, `true-client-ip` or `forwarded` header. The test machine's address appeared nowhere, and the echo saw a Cloudflare address. Cloudflare adds its own `cf-ray` (with a data-center code), `cf-worker`, `cf-visitor`, `cf-ew-via` and `cdn-loop` headers, none of them an address. The throwaway Worker was deleted.
+- **Configuration:**
+  - the rate limit binding (600 requests per 60 s, namespace 7301) deployed on the account's plan;
+  - Workers Logs, Traces and Issues are disabled;
+  - `workers.dev` is disabled.
+- **Unexplained traffic:** the dashboard counted about 250 invocations in the first hours, far more than the test requests. These are probably scanners that found the new hostname through certificate transparency logs; this wasn't verified. Anything off-list gets 404, 405 or 400 and is not forwarded.
+
+### macOS native proof (T18, 2026-11-11 to 2026-11-12)
+
+Run at commit `d1ccb48` on macOS (Apple Silicon). There were three release builds, all with the test identifier `com.tagbasedassetmanager.usagecheck`:
+- one sending to a local listener at `https://127.0.0.1:9443/v1/events`, which logs every connection attempt and then closes it, so TLS fails;
+- one with no endpoint;
+- one with the real endpoint.
+
+The libraries were disposable copies on a scratch disk image, and the first launch used settings in the v0.7.1 shape. The account owner clicked through most checks; the final replay was driven through macOS accessibility scripting. Afterwards the test app data, caches, disk image and builds were removed. The real `com.tagbasedassetmanager.desktop` data was never touched.
+
+- **First ask and upgrade:** the dialog appeared on v0.7.1-shape settings, with the design's text. A click outside was ignored, and Escape saved `declined` with no ID. Libraries and theme were kept, and the dialog didn't appear after relaunch.
+- **No connections without consent:** after declining and after opting out, there were 0 connections across navigating folders, sorting, clicking a tag and editing a tag. While undecided (from launch to the answer, and through a failed first-ask save) there were 0 connections too, but no tracked actions were done in that state. Opting in, the positive control, connected at once. Each tracked action then opened one connection. TLS failing never caused an error or a hang.
+- **Opt-in after a decline, and off then on:** each opt-in sent `app_open` and stored a new client ID. The topbar showed On, and "Local files · sharing usage data" replaced the offline dot.
+- **Opt-out not saved:**
+  - With the app-data folder read-only, Turn off stopped sending at once. The dialog showed the not-saved message, with Save "off" in Turn off's position, and the topbar read "Usage data: Off (not saved)".
+  - A repeated Save "off" showed the message again. Settings still held `granted`, and there were 0 connections.
+  - After write access was restored, Save "off" saved `declined` with no ID. After relaunch, sharing stayed off.
+- **Long operation:** Validate ran on a library of 300,000 empty files. During it, Turn off showed the "another action is running" not-saved message. A double-click and repeated Enter on Save "off" never turned sharing on, and nothing connected. After Validate, Save "off" saved and survived a relaunch. The window stayed responsive.
+- **Single instance:** `open -n` while running, including while minimized, left one process. The second launch handed over to the running app, and the window came forward and was restored from the Dock.
+- **Layout at 820×600:** the dialog and its messages fit. The first run found Save "off" half hidden below the dialog's scroll area after a repeated failure; this is fixed in `d1ccb48` and was confirmed on screen. The focus ring touches the dialog's bottom edge, which is cosmetic.
+- **VoiceOver at 820 px with a large library scanning:** the title, body, Currently line and each message were read. The saved choice was announced once ("Usage data is off."). A caption once read "In dialog, content is empty", probably an empty wrapper; no content was missed.
+- **No-endpoint build:** no dialog and no Usage data control, even while undecided. `strings` finds no usage host in the binary.
+- **Real-endpoint build:** GA Realtime showed `app_open`, `folder_navigate`, `sort_change`, `tag_filter_click`, `tag_edit`, `theme_change`, `search_used`, `library_switch` and `library_scanned`, with `edition` = github and the common params, and the search text was not sent. A `wrangler tail` replay confirmed every request reached the Worker and got 204 (the tail output was deleted, because it holds the client IP). Some events showed in Realtime minutes after they were sent, so a quick Realtime look can undercount.
+
+### Independent review (T19, 2026-11-12)
+
+Three reviewers (config safety, silent failures and a skeptical senior review) read `52f7f75`, and all three approved. The fixes:
+
+- **Worker:**
+  - the kill switch forwards only when `FORWARD` is exactly `on` (before, anything but `off` forwarded, including a missing value);
+  - it answers 503 when `GA_API_SECRET` is missing or empty or `GA_MEASUREMENT_ID` isn't a `G-` ID, and 415 for any content type other than `application/json`;
+  - `preview_urls = false`, with comments on why observability stays off and what a rollback restores.
+- **Allowlist only grows:** `usage-events.v1.json` freezes the first published list, and a Worker test checks the current list still contains all of it.
+- **App:**
+  - turning sharing off, or saving a decline, aborts requests already in progress;
+  - the HTTP client follows no redirects and is HTTPS only;
+  - native update installation refuses while an opt-out isn't saved (before, only the UI blocked it);
+  - a test pins the app version to the Worker's `x.y.z` pattern;
+  - asset actions map to events through an exhaustive switch;
+  - consent buttons scroll with room for the focus ring.
+- **Release guard:** checks GitHub repository ID 1405177639 and uses the name only when no ID is set, so a rename can't turn the check off.
+- **Docs:** the runbook's status table, a rotation step that confirms the new secret in GA Realtime before deleting the old one, a rollback warning, a post-release check, the dev-build wording, known limits, the test plan's Result cells and `.gitignore` entries for Worker env files.
+
+Deferred:
+- **VoiceOver caption "In dialog, content is empty" (K6, U2):** the cause is unverified, and the proposed fix (clearing the live region on a timer, or one always-mounted status area) changes design decision U5-6. Revisit it with a native VoiceOver trace.
+- **Failed consent saves discard the error details (S3):** showing them is a UI change beyond the design. Revisit if a save failure is reported.
+- **Fork pull requests (C10):** whether repository variables reach `store-msix.yml` builds of fork pull requests is unverified.
+
+ADR decision 9 and the design say development builds stay silent. That is true only when they're compiled without the endpoint variable. Both files are hash-bound to the consultation's verdict, so the correction is in [usage analytics](usage-analytics.md) and `CLAUDE.md` instead.
+
+Test events in the production GA property, for annotations (times are UTC+7; client IDs are the random test IDs' first 8 characters):
+
+| When | What | Client |
+|---|---|---|
+| 2026-11-09 | GA setup checks (S0); time not recorded | test |
+| 2026-11-11, about 11:30 | location check through `user_location` (Japan) | test |
+| 2026-11-11, 14:43 to 14:54 | Worker deployment checks with the fixture events | `6db6f1e8` |
+| 2026-11-12, 01:27 to 01:48 | real-endpoint build (T18) and its replay | `98dce666`, `ef3dc59d` |
+| 2026-11-12, 10:42 | one fixture `app_open` after the Worker redeploy (T17 re-check) | `7ebfbeda` |
+| 2026-11-12, 11:42 to 11:44 | real-endpoint build (T18 re-run) | `f3814da8` |
+
+Treat the first release date as the start of real reporting.
+
+Verification at the fix commit:
+- `cargo fmt --check`, and Clippy with `-D warnings` on debug and release, all targets, pass;
+- `cargo test`: 332 passed, 1 ignored;
+- Vitest: 1045 tests in 25 files pass, and the type check and production build pass;
+- Node: 206 Worker and script tests pass, and `actionlint` is clean.
+
+The Worker checks (T17) and the macOS native proof (T18) had to be repeated at this commit, because the Worker and the app both changed. Both are below.
+
+### Worker re-check (T17, 2026-11-12)
+
+The Worker was redeployed from `e7c0d47` (version `cd79f32f`) with the same bindings: `FORWARD` "on", `GA_MEASUREMENT_ID` and the rate limit. Live checks against `usage.minhtran.id.vn`:
+- 415 for a valid body sent as `text/plain`, as curl's default form type and with no content type;
+- 405 for GET, 404 for another path, and 400 for a malformed body and an off-list event;
+- 204 for one valid `app_open` sent as `application/json; charset=utf-8`, and the account owner saw it in GA Realtime.
+
+The strict kill switch and the 503 configuration check are covered by Worker tests only, because checking them live would mean deploying a broken configuration.
+
+### macOS native proof re-run (T18, 2026-11-12)
+
+Run at commit `e7c0d47` on macOS (Apple Silicon), with three release builds under the test identifier `com.tagbasedassetmanager.usagecheck`:
+- one sending to a local listener that logs each connection attempt and closes it, so TLS fails;
+- one with no endpoint;
+- one with the real endpoint.
+
+Disposable libraries (a copy of the sample fixture, 30,000 and 300,000 empty files) were on a scratch disk image. The first launch used v0.7.1-shape settings with a saved search and the Ocean theme. The app was driven through macOS accessibility scripting, and the account owner did the VoiceOver step. Afterwards the test app data, caches, disk image and builds were removed; the real `com.tagbasedassetmanager.desktop` data was never touched. The per-row results are in the [manual test plan](manual-test-plan.md); in short:
+
+- **No connections without consent:** 0 connections while undecided (after a failed first ask and **Close**), after declining, and after opting out, across opening a folder, sorting, clicking a tag and editing a tag. While on, there was one connection per action. Opt-in after a decline, and off then on, each stored a new ID.
+- **Failures and busy states:** all four USAGE-04 cases (No thanks and Turn on, each failed and busy) showed the pressed button and the alert together at 820×600. The keyboard flow, the focus trap and Escape retry behaved as designed. The focus ring now clears the dialog's bottom edge.
+- **Opt-out not saved and long operation:** sending stopped at once while the choice couldn't be saved. During Validate on 300,000 files, a double-click and repeated Enter on **Save "off"** never turned sharing on, and "off" survived a relaunch.
+- **Service down:** with every request failing at TLS, nothing showed an error or hung, 9 sends failed quietly, and quit took 0.4 s.
+- **Single instance, no-endpoint build:** a second launch left one process and restored the minimized window. The no-endpoint build showed no dialog or control and contains no endpoint string.
+- **Real endpoint:** GA Realtime showed `app_open`, `sort_change`, `tag_filter_click` and `theme_change` from client `f3814da8`, and **Turn off** removed the ID.
+- **Not covered:** VoiceOver read the busy review dialog only as "dialog with 11 items"; the account owner accepted this. Open, reveal and copy events weren't driven natively, because a synthetic right-click doesn't open the WebKit context menu; a Vitest test covers all four actions.
+
+An early version of the automation sent one keystroke sequence (a tag name, Return, and a select-all and delete) to whichever app was in front, and VS Code was in front at the time. The tag name arrived as a chat message; no file on disk changed. From then on, every keystroke and click checked first that the test app was in front and stopped the run if it wasn't. The check never fired again.
+
+### Full local gates (T20, 2026-11-12)
+
+Run at `7ec1a96` (code unchanged since the proof commit `e7c0d47`), in the plan's order. Every command exited 0:
+- `pnpm build`; `pnpm test`, 1045 tests in 25 files; `node --test` on the script and Worker tests, 206 tests;
+- `cargo fmt --check`; strict Clippy on debug and `--release`, all targets; `cargo test`, 332 passed and 1 ignored, including the three fixture scan tests that fail only in a dirty main checkout;
+- `actionlint` on all workflows;
+- `git diff --exit-code main...HEAD` on `src-tauri/capabilities/default.json` and `src-tauri/tauri.conf.json`: unchanged.
+
+GitNexus was re-indexed first (`CLAUDE.md` and `AGENTS.md` restored byte-for-byte afterwards). `detect_changes` against `main` rates the branch critical: 613 symbols in 45 files and 184 flows, almost all through the shared settings-save path (`load`, `mutate`, `update_locked`, `capture` and `restore`) that Wave 2 rebuilt so consent saves roll back and never block. The Rust suite covers those flows.
+
+Secret scan: the account owner ran a script that read the GA API secret from a hidden prompt and counted it in tracked files, all git history, untracked and ignored files in both checkouts, the last release build, this project's Claude Code transcripts, the session scratchpad, shell history and Wrangler local state. It found 0 matches. A canary run beforehand confirmed the script detects a match.

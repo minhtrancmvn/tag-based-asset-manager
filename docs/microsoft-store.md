@@ -10,6 +10,7 @@ Status (2026-11-09): published on the Microsoft Store. Submission 1, the `0.6.0.
 | Updates | In-app updater reads the `update-preview` feed | The Store installs updates. The in-app updater refuses before any network request and says so |
 | App settings | `%APPDATA%\com.tagbasedassetmanager.desktop` | Its own settings (identifier `com.tagbasedassetmanager.store`). Windows is expected to keep them in the package's private storage and delete them on uninstall (unverified) |
 | Libraries, tags, sidecars | Same: tags live in each library's `.asset-tags.json` files, so they are shared by both copies | Same |
+| Usage data | Off until the user opts in through the first-launch dialog or **Usage data** in the top bar; the choice is stored in this copy's own settings | Same behavior; the choice is stored in the Store copy's own settings. Only the `edition` value sent differs |
 
 Both copies should install side by side (STORE-01 and STORE-09 check this). The Store copy does not see the GitHub copy's registered libraries or saved searches; add the libraries again.
 
@@ -48,7 +49,7 @@ Record each result:
 
 | ID | Do | Expect |
 |---|---|---|
-| STORE-01 | Start the app from the Start menu | Opens with the welcome screen and no libraries, even if the GitHub copy is installed with libraries |
+| STORE-01 | Start the app from the Start menu | Opens with the welcome screen and no libraries, even if the GitHub copy is installed with libraries, and asks **Share usage data?** with equally sized **No thanks** and **Share usage data** buttons. Choose **No thanks**: the dialog closes and the top bar reads **Usage data: Off** |
 | STORE-02 | Click **Check for updates** | Says this copy is from the Microsoft Store, which installs its updates. Nothing is downloaded |
 | STORE-03 | Add the throwaway library through the folder picker | Scans; rows and existing tags appear |
 | STORE-04 | Add a tag to one file, then quit and reopen the app | The library is still registered and the tag is still there; the tag is in that folder's `.asset-tags.json` |
@@ -70,7 +71,7 @@ Clean up afterwards: in PowerShell run as administrator, `Remove-Item Cert:\Loca
 - Upload `store-msix-upload` in a new submission. Partner Center validates the identity on upload.
 - Restricted capability `runFullTrust`: Partner Center asks for a reason. Suggested text: "Desktop app that catalogs and tags files in folders the user chooses; it reads those folders, writes tag files next to them, and moves user-selected items to the Recycle Bin."
 - Store listing: description, at least one screenshot and the age rating questionnaire.
-- Privacy policy: Partner Center requires one because the package declares `runFullTrust`. The policy is [privacy-policy.md](privacy-policy.md); paste its text under **Provide privacy policy text**, or link to it on GitHub. The app collects no personal data and, in the Store edition, makes no network requests of its own.
+- Privacy policy: Partner Center requires one because the package declares `runFullTrust`. The policy is [privacy-policy.md](privacy-policy.md); paste its text under **Provide privacy policy text**, or link to it on GitHub. The app sends usage data only after in-app opt-in; with it off, the Store edition makes no network requests of its own.
 - Microsoft certification usually takes a few days.
 
 ## Store updates

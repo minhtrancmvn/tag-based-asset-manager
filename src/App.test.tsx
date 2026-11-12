@@ -7,6 +7,8 @@ import { DEVELOPMENT_VERSION, getAppVersion } from "./appVersion";
 import { useLibrary } from "./useLibrary";
 import { deriveRenameMigration } from "./tagRename";
 import { themePalettes } from "./themes";
+import { usageMessageText } from "./components/UsageConsentDialog";
+import type { UsageMessageId } from "./components/UsageConsentDialog";
 import type { RenameMigration } from "./tagRename";
 import type { Asset, LibraryState, LibrarySummary, RenameApplyResult, RenameMapping, RenamePreview, RenameSkippedRow, RenameTargetSummary, SavedSearch, ScanIssue } from "./types";
 
@@ -124,6 +126,9 @@ function setLibraryResult(overrides: Partial<{
     theme: "workshop",
     savingTheme: false,
     setTheme: actions.setTheme,
+    savingUsage: false,
+    setUsageConsent: vi.fn<(_: "granted" | "declined") => Promise<import("./types").UsageConsentResult>>().mockResolvedValue({ status: "saved" }),
+    trackUsage: vi.fn<(_: import("./usage").UsageEvent) => void>(),
     deleting: false,
     recoveryBusy: false,
     editingAssetId: null,
@@ -2610,5 +2615,998 @@ describe("tag rename integration", () => {
       const header = within(sidebar()).getByText("Tags", { selector: ".nav-section-label" });
       expect(document.activeElement).toBe(header);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Usage analytics: consent dialog, topbar, events and install gate (T13)
+// ---------------------------------------------------------------------------------------------------------------------
+type UsageSummaryValue = import("./types").UsageSummary;
+type ConsentResultValue = import("./types").UsageConsentResult;
+const sharingUsage: UsageSummaryValue = { available: true, consent: "granted", saved: true };
+const offUsage: UsageSummaryValue = { available: true, consent: "declined", saved: true };
+const notSavedUsage: UsageSummaryValue = { available: true, consent: "declined", saved: false };
+const undecidedUsage: UsageSummaryValue = { available: true, consent: "undecided", saved: true };
+
+function usageMocks(result: ConsentResultValue = { status: "saved", usage: offUsage }) {
+  return {
+    setUsageConsent: vi.fn<(_: "granted" | "declined") => Promise<ConsentResultValue>>().mockResolvedValue(result),
+    trackUsage: vi.fn<(_: import("./usage").UsageEvent) => void>(),
+  };
+}
+type UsageMocks = ReturnType<typeof usageMocks>;
+type UsageSetup = NonNullable<Parameters<typeof setLibraryResult>[0]> & { usage?: UsageSummaryValue; savingUsage?: boolean; mocks?: UsageMocks };
+/** setLibraryResult plus the usage fields it doesn't know about. Call it again with the same mocks to change the hook state in place. */
+function setUsage({ usage, savingUsage = false, mocks, ...rest }: UsageSetup = {}) {
+  const base = rest.state ?? libraryState;
+  setLibraryResult({ ...rest, state: usage ? { ...base, usage } : base });
+  const current = vi.mocked(useLibrary)();
+  vi.mocked(useLibrary).mockReturnValue({ ...current, savingUsage, ...(mocks ?? {}) });
+}
+
+const firstAskDialog = () => screen.getByRole("dialog", { name: "Share usage data?" });
+const reviewDialog = () => screen.getByRole("dialog", { name: "Usage data" });
+const anyUsageDialog = () => screen.queryByRole("dialog", { name: /^(Share usage data\?|Usage data)$/ });
+const topbarUsageButton = () => screen.getByRole<HTMLButtonElement>("button", { name: /^Usage data: / });
+const statusRegion = () => {
+  const region = document.querySelector<HTMLElement>('.topbar-right > [aria-live="polite"]');
+  if (!region) throw new Error("Usage status region is missing");
+  return region;
+};
+const actionLabels = (dialog: HTMLElement) => [...dialog.querySelectorAll<HTMLElement>(".dialog-actions button")].map((button) => button.textContent);
+const describedText = (dialog: HTMLElement) => (dialog.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+async function click(element: HTMLElement) {
+  await act(async () => { fireEvent.click(element); });
+}
+async function press(dialog: HTMLElement, name: string) {
+  await click(within(dialog).getByRole("button", { name }));
+}
+/** Answers the first ask with a busy result, closes it and clears the call history, leaving the review dialog reachable. */
+async function dismissFirstAsk(mocks: UsageMocks) {
+  mocks.setUsageConsent.mockResolvedValueOnce({ status: "busy" });
+  await press(firstAskDialog(), "No thanks");
+  await press(firstAskDialog(), "Close");
+  mocks.setUsageConsent.mockClear();
+}
+
+const narrowQuery = "(max-width: 1024px)";
+function stubMatchMedia(narrow: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn((query: string) => ({ matches: narrow && query === narrowQuery, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), onchange: null, dispatchEvent: vi.fn() })),
+  });
+}
+const scrollIntoView = vi.fn();
+
+describe("usage consent", () => {
+  beforeEach(() => {
+    stubMatchMedia(false);
+    scrollIntoView.mockClear();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, writable: true, value: scrollIntoView });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  describe("when the first ask opens", () => {
+    it("opens once when undecided on desktop and does not reopen after it is answered", async () => {
+      const mocks = usageMocks();
+      setUsage({ usage: undecidedUsage, mocks });
+      const { rerender } = render(<App />);
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
+      expect(firstAskDialog()).toBeTruthy();
+      rerender(<App />);
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
+      await press(firstAskDialog(), "No thanks");
+      expect(anyUsageDialog()).toBeNull();
+      // The mocked state still reports undecided; the session already answered, so it stays closed.
+      rerender(<App />);
+      expect(anyUsageDialog()).toBeNull();
+    });
+
+    it("does not open when usage is unavailable", () => {
+      setUsage({ usage: { available: false, consent: "undecided", saved: true }, mocks: usageMocks() });
+      render(<App />);
+      expect(anyUsageDialog()).toBeNull();
+    });
+
+    it.each([
+      ["sharing", sharingUsage],
+      ["not sharing and saved", offUsage],
+      ["stopped and not saved", notSavedUsage],
+    ])("does not open when the choice is already made (%s)", (_name, usage) => {
+      setUsage({ usage, mocks: usageMocks() });
+      render(<App />);
+      expect(anyUsageDialog()).toBeNull();
+    });
+
+    it("does not reopen after the user dismissed it with Close", async () => {
+      const mocks = usageMocks({ status: "busy" });
+      setUsage({ usage: undecidedUsage, mocks });
+      const { rerender } = render(<App />);
+      await press(firstAskDialog(), "No thanks");
+      await press(firstAskDialog(), "Close");
+      expect(anyUsageDialog()).toBeNull();
+      rerender(<App />);
+      expect(anyUsageDialog()).toBeNull();
+      expect(mocks.setUsageConsent).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits while the update dialog is open and opens once it closes", async () => {
+      vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({ status: "available", version: "0.5.0", notes: "Release notes" });
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      const { rerender } = render(<App />);
+      await waitFor(() => expect(screen.getByRole("button", { name: /update available/i })).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+      const updateDialog = screen.getByRole("dialog");
+      setUsage({ usage: undecidedUsage, mocks });
+      rerender(<App />);
+      expect(anyUsageDialog()).toBeNull();
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
+      fireEvent.click(within(updateDialog).getByRole("button", { name: /later/i }));
+      expect(firstAskDialog()).toBeTruthy();
+    });
+
+    it("does not open while the backend has sent no usage", () => {
+      setUsage({ mocks: usageMocks() });
+      render(<App />);
+      expect(anyUsageDialog()).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Usage data: / })).toBeNull();
+    });
+
+    it("does not open in browser mode", () => {
+      setUsage({ usage: undecidedUsage, isDesktop: false, mocks: usageMocks() });
+      render(<App />);
+      expect(anyUsageDialog()).toBeNull();
+    });
+
+    it("still opens when a scan error is showing at load", () => {
+      setUsage({ usage: undecidedUsage, error: { message: "Scan failed", path: null, details: null }, mocks: usageMocks() });
+      render(<App />);
+      expect(firstAskDialog()).toBeTruthy();
+    });
+  });
+
+  describe("buttons and focus", () => {
+    it("gives both choice buttons identical classes and type", () => {
+      setUsage({ usage: undecidedUsage, mocks: usageMocks() });
+      render(<App />);
+      const [no, share] = [...firstAskDialog().querySelectorAll<HTMLButtonElement>(".dialog-actions button")];
+      expect(no?.textContent).toBe("No thanks");
+      expect(share?.textContent).toBe("Share usage data");
+      expect(no?.className).toBe(share?.className);
+      expect(no?.className).toBe("secondary-button");
+      expect(no?.type).toBe("button");
+      expect(share?.type).toBe("button");
+    });
+
+    it("focuses the dialog container on open and cycles Tab through the container and both buttons", () => {
+      setUsage({ usage: undecidedUsage, mocks: usageMocks() });
+      render(<App />);
+      const dialog = firstAskDialog();
+      expect(document.activeElement).toBe(dialog);
+      fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Share usage data" }));
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Tab" });
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "No thanks" }));
+    });
+
+    it("sends Tab from the container to the first button", () => {
+      setUsage({ usage: undecidedUsage, mocks: usageMocks() });
+      render(<App />);
+      const dialog = firstAskDialog();
+      fireEvent.keyDown(dialog, { key: "Tab" });
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "No thanks" }));
+    });
+
+    it("describes the first ask by its body only", () => {
+      setUsage({ usage: undecidedUsage, mocks: usageMocks() });
+      render(<App />);
+      const dialog = firstAskDialog();
+      const ids = (dialog.getAttribute("aria-describedby") ?? "").split(" ");
+      expect(ids).toHaveLength(1);
+      const text = describedText(dialog);
+      expect(text).toContain("Nothing is sent unless you choose Share usage data.");
+      expect(text).toContain("Never sent:");
+      expect(text).toContain("Google Analytics");
+      expect(text).toContain("at the top of the app");
+    });
+
+    it("describes the review dialog by the Currently line and the body", () => {
+      setUsage({ usage: sharingUsage, mocks: usageMocks() });
+      render(<App />);
+      fireEvent.click(topbarUsageButton());
+      const dialog = reviewDialog();
+      const ids = (dialog.getAttribute("aria-describedby") ?? "").split(" ");
+      expect(ids).toHaveLength(2);
+      expect(document.getElementById(ids[0]!)?.textContent).toBe("Currently: sharing usage data");
+      expect(document.getElementById(ids[1]!)?.textContent).toContain("Never sent:");
+    });
+  });
+
+  describe("first ask", () => {
+    it("saves declined on Escape", async () => {
+      const mocks = usageMocks();
+      setUsage({ usage: undecidedUsage, mocks });
+      render(<App />);
+      await act(async () => { fireEvent.keyDown(firstAskDialog(), { key: "Escape" }); });
+      expect(mocks.setUsageConsent).toHaveBeenCalledExactlyOnceWith("declined");
+    });
+
+    it("ignores an outside mouse-down (prevented, no native call) but not a mouse-down on the body text", () => {
+      const mocks = usageMocks();
+      setUsage({ usage: undecidedUsage, mocks });
+      render(<App />);
+      const dialog = firstAskDialog();
+      expect(fireEvent.mouseDown(dialog.parentElement!)).toBe(false);
+      expect(mocks.setUsageConsent).not.toHaveBeenCalled();
+      expect(firstAskDialog()).toBe(dialog);
+      const bodyText = dialog.querySelector<HTMLElement>(".usage-consent-body p");
+      expect(bodyText).toBeTruthy();
+      expect(fireEvent.mouseDown(bodyText!)).toBe(true);
+      expect(mocks.setUsageConsent).not.toHaveBeenCalled();
+    });
+
+    it.each<[UsageMessageId, ConsentResultValue]>([
+      ["busyAsk", { status: "busy" }],
+      ["failedAsk", { status: "failed" }],
+    ])("keeps the dialog open with the first-ask text after a %s result and moves focus to Close", async (id, result) => {
+      const mocks = usageMocks(result);
+      setUsage({ usage: undecidedUsage, mocks });
+      render(<App />);
+      await press(firstAskDialog(), "Share usage data");
+      const dialog = firstAskDialog();
+      expect(mocks.setUsageConsent).toHaveBeenCalledExactlyOnceWith("granted");
+      expect(within(dialog).getByRole("alert").textContent).toBe(usageMessageText(id));
+      expect(describedText(dialog)).toContain("Nothing is sent unless you choose Share usage data.");
+      expect(actionLabels(dialog)).toEqual(["No thanks", "Share usage data"]);
+      const close = within(dialog).getByRole("button", { name: "Close" });
+      expect(document.activeElement).toBe(close);
+      // Close comes before the choice buttons, so those don't move.
+      const noThanks = within(dialog).getByRole("button", { name: "No thanks" });
+      expect(close.compareDocumentPosition(noThanks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(statusRegion().textContent).toBe("");
+    });
+
+    it("leaves the app usable after Close", async () => {
+      const mocks = usageMocks({ status: "busy" });
+      setUsage({ usage: undecidedUsage, mocks });
+      render(<App />);
+      await press(firstAskDialog(), "No thanks");
+      await press(firstAskDialog(), "Close");
+      expect(anyUsageDialog()).toBeNull();
+      fireEvent.click(assetRows()[0]!);
+      expect(assetRows()[0]!.getAttribute("aria-selected")).toBe("true");
+      expect(topbarUsageButton().textContent).toBe("Usage data: Off");
+      expect(statusRegion().textContent).toBe("");
+    });
+  });
+});
+
+function useUsageEnvironment(narrow = false) {
+  beforeEach(() => {
+    stubMatchMedia(narrow);
+    scrollIntoView.mockClear();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, writable: true, value: scrollIntoView });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+}
+/** Renders with the given effective choice and opens the review dialog (after dismissing the first ask when undecided). */
+async function openReview(usage: UsageSummaryValue, mocks: UsageMocks) {
+  setUsage({ usage, mocks });
+  const view = render(<App />);
+  if (usage.consent === "undecided") await dismissFirstAsk(mocks);
+  fireEvent.click(topbarUsageButton());
+  return { ...view, dialog: reviewDialog() };
+}
+
+describe("usage consent review", () => {
+  useUsageEnvironment();
+
+  describe("review states", () => {
+    it("sharing: Currently line, Turn off and Keep sharing", async () => {
+      const { dialog } = await openReview(sharingUsage, usageMocks());
+      expect(dialog.querySelector("h2")?.textContent).toBe("Usage data");
+      expect(dialog.querySelector(".usage-consent-current")?.textContent).toBe("Currently: sharing usage data");
+      expect(actionLabels(dialog)).toEqual(["Turn off", "Keep sharing"]);
+    });
+
+    it("not sharing and saved: Currently line, Turn on and Keep off", async () => {
+      const { dialog } = await openReview(offUsage, usageMocks());
+      expect(dialog.querySelector("h2")?.textContent).toBe("Usage data");
+      expect(dialog.querySelector(".usage-consent-current")?.textContent).toBe("Currently: not sharing usage data");
+      expect(actionLabels(dialog)).toEqual(["Turn on", "Keep off"]);
+    });
+
+    it("not sharing and not saved: names the unsaved choice, offers Save \"off\" and Turn on", async () => {
+      const { dialog } = await openReview(notSavedUsage, usageMocks());
+      expect(dialog.querySelector("h2")?.textContent).toBe("Usage data");
+      expect(dialog.querySelector(".usage-consent-current")?.textContent).toBe("Currently: not sharing usage data. This choice isn't saved yet, so sharing will resume the next time the app opens.");
+      expect(actionLabels(dialog)).toEqual(['Save "off"', "Turn on"]);
+    });
+
+    it("undecided after the first ask was closed: No thanks and Share usage data", async () => {
+      const { dialog } = await openReview(undecidedUsage, usageMocks());
+      expect(dialog.querySelector("h2")?.textContent).toBe("Usage data");
+      expect(dialog.querySelector(".usage-consent-current")?.textContent).toBe("Currently: not sharing usage data. You haven't chosen yet.");
+      expect(actionLabels(dialog)).toEqual(["No thanks", "Share usage data"]);
+    });
+
+    it.each([
+      ["sharing", sharingUsage],
+      ["not sharing and saved", offUsage],
+      ["not sharing and not saved", notSavedUsage],
+      ["undecided", undecidedUsage],
+    ])("describes the recipient in the %s row without pointing at the topbar", async (_name, usage) => {
+      const { dialog } = await openReview(usage, usageMocks());
+      const text = describedText(dialog);
+      expect(text).toContain("Google Analytics");
+      expect(text).not.toContain("at the top of the app");
+      expect(text).toContain("Currently:");
+    });
+  });
+
+  describe("undecided review", () => {
+    it.each<[string, ConsentResultValue]>([
+      ["busy", { status: "busy" }],
+      ["failed", { status: "failed" }],
+    ])("keeps focus on the pressed button after a %s result and has exactly one close control", async (_name, result) => {
+      const mocks = usageMocks();
+      const { dialog } = await openReview(undecidedUsage, mocks);
+      mocks.setUsageConsent.mockResolvedValue(result);
+      const share = within(dialog).getByRole("button", { name: "Share usage data" });
+      share.focus();
+      await click(share);
+      expect(mocks.setUsageConsent).toHaveBeenCalledExactlyOnceWith("granted");
+      expect(within(dialog).getByRole("alert")).toBeTruthy();
+      expect(document.activeElement).toBe(share);
+      expect(within(dialog).getAllByRole("button", { name: /close/i })).toHaveLength(1);
+      expect(within(dialog).queryByRole("button", { name: "Close" })).toBeNull();
+    });
+  });
+
+  describe("scrolling the pressed button into view", () => {
+    it("calls scrollIntoView with block nearest on the pressed button when focus stays on it", async () => {
+      const mocks = usageMocks({ status: "busy" });
+      const { dialog } = await openReview(offUsage, mocks);
+      const turnOn = within(dialog).getByRole("button", { name: "Turn on" });
+      turnOn.focus();
+      scrollIntoView.mockClear();
+      await click(turnOn);
+      expect(document.activeElement).toBe(turnOn);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(scrollIntoView.mock.contexts).toContain(turnOn);
+    });
+
+    it("scrolls Save \"off\" into view after each stopped-not-saved result, including a repeat", async () => {
+      // Native acceptance at 820×600 found the buttons half hidden after a repeated failure.
+      const mocks = usageMocks({ status: "stoppedNotSaved", reason: "failed", usage: notSavedUsage });
+      const { dialog } = await openReview(notSavedUsage, mocks);
+      const saveOff = within(dialog).getByRole("button", { name: 'Save "off"' });
+      saveOff.focus();
+      scrollIntoView.mockClear();
+      await click(saveOff);
+      const focused = within(dialog).getByRole("button", { name: 'Save "off"' });
+      expect(document.activeElement).toBe(focused);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(scrollIntoView.mock.contexts).toContain(focused);
+      scrollIntoView.mockClear();
+      await click(focused);
+      expect(scrollIntoView.mock.contexts).toContain(within(dialog).getByRole("button", { name: 'Save "off"' }));
+    });
+
+    it("scrolls Close into view when the first ask can't save", async () => {
+      const mocks = usageMocks({ status: "busy" });
+      setUsage({ usage: undecidedUsage, mocks });
+      render(<App />);
+      const dialog = firstAskDialog();
+      scrollIntoView.mockClear();
+      await click(within(dialog).getByRole("button", { name: "No thanks" }));
+      const close = within(dialog).getByRole("button", { name: "Close" });
+      expect(document.activeElement).toBe(close);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      expect(scrollIntoView.mock.contexts).toContain(close);
+    });
+
+    it("also scrolls it into view when focus had moved away from the pressed button", async () => {
+      const mocks = usageMocks({ status: "failed" });
+      const { dialog } = await openReview(offUsage, mocks);
+      const turnOn = within(dialog).getByRole("button", { name: "Turn on" });
+      scrollIntoView.mockClear();
+      await click(turnOn);
+      expect(document.activeElement).toBe(turnOn);
+      expect(scrollIntoView.mock.contexts).toContain(turnOn);
+    });
+  });
+
+  describe("dismissing without a choice", () => {
+    it.each([
+      ["sharing", sharingUsage],
+      ["not sharing and saved", offUsage],
+      ["not sharing and not saved", notSavedUsage],
+      ["undecided", undecidedUsage],
+    ])("makes no native call for Escape, an outside click or the close button (%s)", async (_name, usage) => {
+      const mocks = usageMocks();
+      const view = await openReview(usage, mocks);
+      await act(async () => { fireEvent.keyDown(view.dialog, { key: "Escape" }); });
+      expect(anyUsageDialog()).toBeNull();
+
+      fireEvent.click(topbarUsageButton());
+      fireEvent.mouseDown(reviewDialog().parentElement!);
+      expect(anyUsageDialog()).toBeNull();
+
+      fireEvent.click(topbarUsageButton());
+      await click(within(reviewDialog()).getByRole("button", { name: "Close usage data" }));
+      expect(anyUsageDialog()).toBeNull();
+      expect(mocks.setUsageConsent).not.toHaveBeenCalled();
+      expect(statusRegion().textContent).toBe("");
+    });
+
+    it.each([
+      ["Keep sharing", sharingUsage],
+      ["Keep off", offUsage],
+    ])("%s closes the dialog without a native call", async (name, usage) => {
+      const mocks = usageMocks();
+      const { dialog } = await openReview(usage, mocks);
+      await press(dialog, name);
+      expect(anyUsageDialog()).toBeNull();
+      expect(mocks.setUsageConsent).not.toHaveBeenCalled();
+      expect(statusRegion().textContent).toBe("");
+    });
+  });
+
+  describe("stopped, not saved", () => {
+    it("moves focus to Save \"off\", which saves declined when pressed again", async () => {
+      const mocks = usageMocks();
+      mocks.setUsageConsent.mockImplementationOnce(async () => {
+        setUsage({ usage: notSavedUsage, mocks });
+        return { status: "stoppedNotSaved", reason: "busy", usage: notSavedUsage };
+      });
+      const { dialog, rerender } = await openReview(sharingUsage, mocks);
+      const turnOff = within(dialog).getByRole("button", { name: "Turn off" });
+      turnOff.focus();
+      await click(turnOff);
+      rerender(<App />);
+      expect(within(dialog).getByRole("alert").textContent).toBe(usageMessageText("stoppedBusy"));
+      expect(actionLabels(dialog)).toEqual(['Save "off"', "Turn on"]);
+      const saveOff = within(dialog).getByRole("button", { name: 'Save "off"' });
+      expect(document.activeElement).toBe(saveOff);
+      expect(within(dialog).queryByRole("button", { name: /try again/i })).toBeNull();
+      expect(statusRegion().textContent).toBe("");
+
+      mocks.setUsageConsent.mockResolvedValueOnce({ status: "saved", usage: offUsage });
+      await click(document.activeElement as HTMLElement);
+      expect(mocks.setUsageConsent.mock.calls).toEqual([["declined"], ["declined"]]);
+      expect(anyUsageDialog()).toBeNull();
+      expect(statusRegion().textContent).toBe("Usage data turned off.");
+    });
+
+    it("sends Turn on to native as granted", async () => {
+      const mocks = usageMocks({ status: "saved", usage: sharingUsage });
+      const { dialog } = await openReview(notSavedUsage, mocks);
+      await press(dialog, "Turn on");
+      expect(mocks.setUsageConsent).toHaveBeenCalledExactlyOnceWith("granted");
+      expect(statusRegion().textContent).toBe("Usage data turned on.");
+    });
+
+    it.each<[UsageMessageId, "busy" | "failed"]>([
+      ["stoppedBusy", "busy"],
+      ["stoppedFailed", "failed"],
+    ])("a repeated stopped-not-saved (%s) keeps Save \"off\" focused and never offers Try again", async (id, reason) => {
+      const mocks = usageMocks({ status: "stoppedNotSaved", reason, usage: notSavedUsage });
+      const { dialog } = await openReview(notSavedUsage, mocks);
+      const saveOff = within(dialog).getByRole("button", { name: 'Save "off"' });
+      saveOff.focus();
+      await click(saveOff);
+      expect(within(dialog).getByRole("alert").textContent).toBe(usageMessageText(id));
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: 'Save "off"' }));
+      expect(within(dialog).queryByRole("button", { name: /try again/i })).toBeNull();
+    });
+  });
+
+  describe.each<["first" | "review"]>([["first"], ["review"]])("while saving (%s)", (mode) => {
+    async function startSave() {
+      const pending = deferredResult<ConsentResultValue>();
+      const mocks = usageMocks();
+      mocks.setUsageConsent.mockImplementation(() => pending.promise);
+      let dialog: HTMLElement;
+      let rerender: ReturnType<typeof render>["rerender"];
+      let pressed: HTMLElement;
+      if (mode === "first") {
+        setUsage({ usage: undecidedUsage, mocks });
+        ({ rerender } = render(<App />));
+        dialog = firstAskDialog();
+        pressed = within(dialog).getByRole("button", { name: "No thanks" });
+      } else {
+        ({ dialog, rerender } = await openReview(sharingUsage, mocks));
+        pressed = within(dialog).getByRole("button", { name: "Turn off" });
+      }
+      pressed.focus();
+      await click(pressed);
+      // The hook reports the pending save the way the real one does.
+      setUsage({ usage: mode === "first" ? undecidedUsage : sharingUsage, savingUsage: true, mocks });
+      rerender(<App />);
+      return { dialog, pressed, mocks, pending, rerender };
+    }
+
+    it("marks both choice buttons aria-disabled, shows Saving and keeps focus on the pressed button", async () => {
+      const { dialog, pressed } = await startSave();
+      const buttons = [...dialog.querySelectorAll<HTMLElement>(".dialog-actions button")];
+      expect(buttons).toHaveLength(2);
+      for (const button of buttons) expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(within(dialog).getByText("Saving…")).toBeTruthy();
+      expect(document.activeElement).toBe(pressed);
+    });
+
+    it("ignores clicks on either choice button: no second native call", async () => {
+      const { dialog, mocks } = await startSave();
+      for (const button of dialog.querySelectorAll<HTMLElement>(".dialog-actions button")) await click(button);
+      expect(mocks.setUsageConsent).toHaveBeenCalledTimes(1);
+      expect(anyUsageDialog()).toBe(dialog);
+    });
+
+    it("ignores Escape and an outside click", async () => {
+      const { dialog, mocks } = await startSave();
+      await act(async () => { fireEvent.keyDown(dialog, { key: "Escape" }); });
+      expect(fireEvent.mouseDown(dialog.parentElement!)).toBe(false);
+      expect(mocks.setUsageConsent).toHaveBeenCalledTimes(1);
+      expect(anyUsageDialog()).toBe(dialog);
+    });
+
+    it("ignores the close button while saving (review only)", async () => {
+      const { dialog } = await startSave();
+      const close = dialog.querySelector<HTMLElement>('button[aria-label="Close usage data"]');
+      if (mode === "first") { expect(close).toBeNull(); return; }
+      expect(close?.getAttribute("aria-disabled")).toBe("true");
+      await click(close!);
+      expect(anyUsageDialog()).toBe(dialog);
+    });
+  });
+});
+function deferredResult<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+interface MessageCase {
+  name: string;
+  mode: "first" | "review";
+  usage: UsageSummaryValue;
+  press: string;
+  result: ConsentResultValue;
+  alert: UsageMessageId | null;
+  status: string;
+}
+const messageRows: MessageCase[] = [
+  { name: "saved turn off from sharing", mode: "review", usage: sharingUsage, press: "Turn off", result: { status: "saved", usage: offUsage }, alert: null, status: "Usage data turned off." },
+  { name: "saved turn on from not sharing", mode: "review", usage: offUsage, press: "Turn on", result: { status: "saved", usage: sharingUsage }, alert: null, status: "Usage data turned on." },
+  { name: "saved Save \"off\" from not saved", mode: "review", usage: notSavedUsage, press: "Save \"off\"", result: { status: "saved", usage: offUsage }, alert: null, status: "Usage data turned off." },
+  { name: "saved Turn on from not saved", mode: "review", usage: notSavedUsage, press: "Turn on", result: { status: "saved", usage: sharingUsage }, alert: null, status: "Usage data turned on." },
+  { name: "saved share from the first ask", mode: "first", usage: undecidedUsage, press: "Share usage data", result: { status: "saved", usage: sharingUsage }, alert: null, status: "Usage data is on." },
+  { name: "saved No thanks from the first ask", mode: "first", usage: undecidedUsage, press: "No thanks", result: { status: "saved", usage: offUsage }, alert: null, status: "Usage data is off." },
+  { name: "saved share from an undecided review", mode: "review", usage: undecidedUsage, press: "Share usage data", result: { status: "saved", usage: sharingUsage }, alert: null, status: "Usage data is on." },
+  { name: "saved No thanks from an undecided review", mode: "review", usage: undecidedUsage, press: "No thanks", result: { status: "saved", usage: offUsage }, alert: null, status: "Usage data is off." },
+  { name: "busy in the first ask", mode: "first", usage: undecidedUsage, press: "Share usage data", result: { status: "busy" }, alert: "busyAsk", status: "" },
+  { name: "busy in an undecided review", mode: "review", usage: undecidedUsage, press: "Share usage data", result: { status: "busy" }, alert: "busyAsk", status: "" },
+  { name: "busy turning on from not sharing", mode: "review", usage: offUsage, press: "Turn on", result: { status: "busy" }, alert: "busyTurnOn", status: "" },
+  { name: "failed in the first ask", mode: "first", usage: undecidedUsage, press: "No thanks", result: { status: "failed" }, alert: "failedAsk", status: "" },
+  { name: "failed in an undecided review", mode: "review", usage: undecidedUsage, press: "No thanks", result: { status: "failed" }, alert: "failedAsk", status: "" },
+  { name: "failed turning on from not sharing", mode: "review", usage: offUsage, press: "Turn on", result: { status: "failed" }, alert: "failedTurnOn", status: "" },
+  { name: "stopped, not saved, because busy", mode: "review", usage: sharingUsage, press: "Turn off", result: { status: "stoppedNotSaved", reason: "busy", usage: notSavedUsage }, alert: "stoppedBusy", status: "" },
+  { name: "stopped, not saved, because the write failed", mode: "review", usage: sharingUsage, press: "Turn off", result: { status: "stoppedNotSaved", reason: "failed", usage: notSavedUsage }, alert: "stoppedFailed", status: "" },
+  { name: "native side unreachable while turning off", mode: "review", usage: sharingUsage, press: "Turn off", result: { status: "failed" }, alert: "unreachableTurnOff", status: "" },
+];
+async function openForCase(row: Pick<MessageCase, "mode" | "usage">, mocks: UsageMocks) {
+  if (row.mode === "review") return openReview(row.usage, mocks);
+  setUsage({ usage: row.usage, mocks });
+  const view = render(<App />);
+  return { ...view, dialog: firstAskDialog() };
+}
+
+describe("usage consent messages", () => {
+  useUsageEnvironment();
+
+  it.each(messageRows)("$name", async (row) => {
+    const mocks = usageMocks();
+    const { dialog } = await openForCase(row, mocks);
+    mocks.setUsageConsent.mockResolvedValue(row.result);
+    await press(dialog, row.press);
+    expect(mocks.setUsageConsent).toHaveBeenCalledTimes(1);
+    if (row.alert === null) {
+      // A saved result closes the dialog; the polite region carries the one sentence.
+      expect(anyUsageDialog()).toBeNull();
+    } else {
+      expect(anyUsageDialog()).toBe(dialog);
+      expect(within(dialog).getByRole("alert").textContent).toBe(usageMessageText(row.alert));
+    }
+    expect(statusRegion().textContent).toBe(row.status);
+  });
+
+  it("puts nothing in the polite region for busy, failed and not-saved rows (only saved rows announce)", async () => {
+    for (const row of messageRows.filter((candidate) => candidate.alert !== null)) {
+      const mocks = usageMocks();
+      const { dialog, unmount } = await openForCase(row, mocks);
+      mocks.setUsageConsent.mockResolvedValue(row.result);
+      await press(dialog, row.press);
+      expect(statusRegion().textContent, row.name).toBe("");
+      unmount();
+    }
+  });
+
+  it("clears the message when a save starts", async () => {
+    const mocks = usageMocks({ status: "busy" });
+    const { dialog } = await openReview(offUsage, mocks);
+    await press(dialog, "Turn on");
+    expect(within(dialog).getByRole("alert").textContent).toBe(usageMessageText("busyTurnOn"));
+    const pending = deferredResult<ConsentResultValue>();
+    mocks.setUsageConsent.mockImplementation(() => pending.promise);
+    await press(dialog, "Turn on");
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    await act(async () => { pending.resolve({ status: "failed" }); });
+    expect(within(dialog).getByRole("alert").textContent).toBe(usageMessageText("failedTurnOn"));
+  });
+
+  it("clears the message when the dialog reopens", async () => {
+    const mocks = usageMocks({ status: "busy" });
+    const { dialog } = await openReview(offUsage, mocks);
+    await press(dialog, "Turn on");
+    expect(within(dialog).getByRole("alert")).toBeTruthy();
+    await act(async () => { fireEvent.keyDown(dialog, { key: "Escape" }); });
+    expect(anyUsageDialog()).toBeNull();
+    fireEvent.click(topbarUsageButton());
+    expect(within(reviewDialog()).queryByRole("alert")).toBeNull();
+  });
+
+  it("re-mounts the alert for a second identical failure", async () => {
+    const mocks = usageMocks({ status: "failed" });
+    const { dialog } = await openReview(offUsage, mocks);
+    await press(dialog, "Turn on");
+    const first = within(dialog).getByRole("alert");
+    await press(dialog, "Turn on");
+    const second = within(dialog).getByRole("alert");
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+    expect(mocks.setUsageConsent).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the status region when the dialog is opened after \"Usage data turned on.\"", async () => {
+    const mocks = usageMocks({ status: "saved", usage: sharingUsage });
+    const { dialog } = await openReview(offUsage, mocks);
+    await press(dialog, "Turn on");
+    expect(statusRegion().textContent).toBe("Usage data turned on.");
+    fireEvent.click(topbarUsageButton());
+    expect(statusRegion().textContent).toBe("");
+    expect(reviewDialog()).toBeTruthy();
+  });
+
+  it("keeps the status region outside the topbar info text that is hidden at narrow widths", () => {
+    setUsage({ usage: sharingUsage, mocks: usageMocks() });
+    render(<App />);
+    expect(statusRegion().closest(".topbar-info")).toBeNull();
+    expect(statusRegion().getAttribute("role")).toBeNull();
+    expect(statusRegion().getAttribute("aria-atomic")).toBe("true");
+  });
+});
+
+describe("usage topbar", () => {
+  useUsageEnvironment();
+
+  it.each([
+    ["sharing", sharingUsage, "Usage data: On"],
+    ["not sharing and saved", offUsage, "Usage data: Off"],
+    ["not sharing and not saved", notSavedUsage, "Usage data: Off (not saved)"],
+    ["undecided", undecidedUsage, "Usage data: Off"],
+  ])("reads from the effective choice and saved flag (%s)", (_name, usage, label) => {
+    setUsage({ usage, mocks: usageMocks() });
+    render(<App />);
+    const button = topbarUsageButton();
+    expect(button.textContent).toBe(label);
+    expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(button.className).toContain("quiet-button");
+  });
+
+  it("is absent when usage is unavailable", () => {
+    setUsage({ usage: { available: false, consent: "declined", saved: true }, mocks: usageMocks() });
+    render(<App />);
+    expect(screen.queryByRole("button", { name: /^Usage data: / })).toBeNull();
+  });
+
+  it("stays enabled during a pending scan and other operations", () => {
+    setUsage({ usage: offUsage, scanning: true, actionBusy: true, mocks: usageMocks() });
+    render(<App />);
+    const button = topbarUsageButton();
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(button);
+    expect(reviewDialog()).toBeTruthy();
+  });
+
+  it("shows the sharing status text and hides the offline dot only when available and granted", () => {
+    setUsage({ usage: sharingUsage, mocks: usageMocks() });
+    const { container, rerender } = render(<App />);
+    const info = () => container.querySelector(".topbar-info");
+    expect(info()?.textContent).toBe("Local files · sharing usage data");
+    expect(info()?.querySelector(".offline-dot")).toBeNull();
+
+    for (const usage of [offUsage, undecidedUsage, notSavedUsage]) {
+      setUsage({ usage, mocks: usageMocks() });
+      rerender(<App />);
+      expect(info()?.textContent).toContain("Local files · explicit actions only");
+      expect(info()?.querySelector(".offline-dot")).toBeTruthy();
+      expect(container.textContent).not.toContain("sharing usage data");
+    }
+  });
+
+  it("does not show the sharing text when granted but unavailable", () => {
+    setUsage({ usage: { available: false, consent: "granted", saved: true }, mocks: usageMocks() });
+    const { container } = render(<App />);
+    const info = container.querySelector(".topbar-info");
+    expect(info?.textContent).toContain("Local files · explicit actions only");
+    expect(info?.querySelector(".offline-dot")).toBeTruthy();
+    expect(container.textContent).not.toContain("sharing usage data");
+  });
+});
+
+describe("usage events from the app", () => {
+  useUsageEnvironment();
+  const tagged: Asset = { ...assets[0]!, tags: ["favorite"], metadataState: "valid", metadataId: "uuid-1", metadataRevision: "rev-1" };
+  const gearRow = () => assetRows().find((row) => row.getAttribute("title") === "Gear.stl")!;
+  const tracked = (mocks: UsageMocks) => mocks.trackUsage.mock.calls.map(([event]) => event);
+  const searchBox = () => screen.getByRole<HTMLInputElement>("textbox", { name: "Search assets and tags" });
+  const sidebarTag = (container: HTMLElement) => container.querySelector<HTMLElement>('.tag-nav[title="Filter by favorite"]')!;
+  const savedSearch: SavedSearch = { id: "s1", libraryId: library.id, name: "Gear search", filters: { query: "favorite", view: "all", matchMode: "any", kind: "file" } };
+
+  describe("search_used", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("fires once after 2 s of non-empty typing and carries no query text", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      fireEvent.change(searchBox(), { target: { value: "secret" } });
+      act(() => { vi.advanceTimersByTime(1000); });
+      fireEvent.change(searchBox(), { target: { value: "secret term" } });
+      act(() => { vi.advanceTimersByTime(1999); });
+      expect(mocks.trackUsage).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(mocks.trackUsage).toHaveBeenCalledWith({ name: "search_used" });
+      expect(mocks.trackUsage.mock.calls).toEqual([[{ name: "search_used" }]]);
+      act(() => { vi.advanceTimersByTime(10_000); });
+      expect(mocks.trackUsage).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not fire when the text is cleared within 2 s", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      fireEvent.change(searchBox(), { target: { value: "gear" } });
+      act(() => { vi.advanceTimersByTime(1500); });
+      fireEvent.change(searchBox(), { target: { value: "" } });
+      act(() => { vi.advanceTimersByTime(5000); });
+      expect(mocks.trackUsage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("tag_filter_click", () => {
+    it("sends one tag_filter_click and no search_used from the sidebar", () => {
+      const mocks = usageMocks();
+      setUsage({ assets: [tagged, assets[1]!], mocks });
+      const { container } = render(<App />);
+      fireEvent.click(sidebarTag(container));
+      expect(searchBox().value).toBe("favorite");
+      expect(tracked(mocks)).toEqual([{ name: "tag_filter_click" }]);
+    });
+
+    it("sends one tag_filter_click and no search_used from a row's tag list", () => {
+      const mocks = usageMocks();
+      setUsage({ assets: [tagged, assets[1]!], mocks });
+      render(<App />);
+      fireEvent.click(within(gearRow()).getByRole("button", { name: "favorite" }));
+      expect(searchBox().value).toBe("favorite");
+      expect(tracked(mocks)).toEqual([{ name: "tag_filter_click" }]);
+    });
+
+    it("sends one tag_filter_click and no search_used from the details panel", () => {
+      const mocks = usageMocks();
+      setUsage({ assets: [tagged, assets[1]!], mocks });
+      render(<App />);
+      fireEvent.click(gearRow());
+      fireEvent.click(within(screen.getByRole("complementary", { name: "Asset details" })).getByRole("button", { name: "favorite" }));
+      expect(searchBox().value).toBe("favorite");
+      expect(tracked(mocks)).toEqual([{ name: "tag_filter_click" }]);
+    });
+  });
+
+  describe("filter_change", () => {
+    it("is not sent when loading a saved search that changes the match mode and kind", () => {
+      const mocks = usageMocks();
+      setUsage({ assets: [tagged, assets[1]!], savedSearches: [savedSearch], mocks });
+      render(<App />);
+      fireEvent.click(screen.getByTitle("Load Gear search"));
+      expect(searchBox().value).toBe("favorite");
+      expect(tracked(mocks)).toEqual([{ name: "saved_search_apply" }]);
+    });
+
+    it("is not sent by Clear active filter", () => {
+      const mocks = usageMocks();
+      setUsage({ assets: [tagged, assets[1]!], mocks });
+      const { container } = render(<App />);
+      fireEvent.click(sidebarTag(container));
+      fireEvent.click(screen.getByRole("button", { name: "Clear active filter" }));
+      expect(searchBox().value).toBe("");
+      expect(tracked(mocks)).toEqual([{ name: "tag_filter_click" }]);
+    });
+
+    it("is not sent when changing view", () => {
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: /^Untagged/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^All assets/ }));
+      expect(tracked(mocks)).toEqual([]);
+    });
+
+    it("is not sent when the library switches and resets the filters", () => {
+      const mocks = usageMocks();
+      setUsage({ assets: [tagged, assets[1]!], mocks });
+      const { container, rerender } = render(<App />);
+      fireEvent.click(sidebarTag(container));
+      expect(screen.getByRole("button", { name: "Clear active filter" })).toBeTruthy();
+      setUsage({ assets: [tagged, assets[1]!], library: secondLibrary, state: { ...libraryState, activeLibraryId: secondLibrary.id }, mocks });
+      rerender(<App />);
+      expect(screen.queryByRole("button", { name: "Clear active filter" })).toBeNull();
+      expect(tracked(mocks)).toEqual([{ name: "tag_filter_click" }]);
+    });
+
+    it("is sent once when the kind filter changes", () => {
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      chooseFilter("Asset kind", "Files");
+      expect(tracked(mocks)).toEqual([{ name: "filter_change" }]);
+    });
+
+    it("is sent once when the match mode changes", () => {
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      chooseFilter("Required tag match", "Any tag");
+      expect(tracked(mocks)).toEqual([{ name: "filter_change" }]);
+    });
+  });
+
+  describe("asset_preview", () => {
+    const textPreview = { kind: "text" as const, content: "hello preview", mimeType: "text/plain", truncated: false, message: null };
+
+    it("is sent once when a text preview shows", async () => {
+      actions.previewAsset.mockResolvedValue(textPreview);
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      fireEvent.click(gearRow());
+      expect(await screen.findByText("hello preview")).toBeTruthy();
+      expect(tracked(mocks)).toEqual([{ name: "asset_preview" }]);
+    });
+
+    it("is not sent for an unsupported preview", async () => {
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      fireEvent.click(gearRow());
+      expect(await screen.findByText("No preview available.")).toBeTruthy();
+      expect(actions.previewAsset).toHaveBeenCalledTimes(1);
+      expect(tracked(mocks)).toEqual([]);
+    });
+
+    it("is not sent, and nothing loads, while the details panel is hidden", async () => {
+      actions.previewAsset.mockResolvedValue(textPreview);
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Hide details" }));
+      fireEvent.click(gearRow());
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.queryByText("hello preview")).toBeNull();
+      expect(actions.previewAsset).not.toHaveBeenCalled();
+      expect(tracked(mocks)).toEqual([{ name: "details_panel_close" }]);
+    });
+
+    describe("in a narrow window", () => {
+      beforeEach(() => { stubMatchMedia(true); });
+
+      it("shows the preview but sends no event", async () => {
+        actions.previewAsset.mockResolvedValue(textPreview);
+        const mocks = usageMocks();
+        setUsage({ mocks });
+        render(<App />);
+        fireEvent.click(gearRow());
+        expect(await screen.findByText("hello preview")).toBeTruthy();
+        expect(window.matchMedia).toHaveBeenCalledWith(narrowQuery);
+        expect(tracked(mocks)).toEqual([]);
+      });
+    });
+
+    it("is not repeated for the same item, and re-rendering or scrolling does not reload the preview", async () => {
+      actions.previewAsset.mockResolvedValue(textPreview);
+      const mocks = usageMocks();
+      setUsage({ mocks });
+      const { rerender } = render(<App />);
+      fireEvent.click(gearRow());
+      expect(await screen.findByText("hello preview")).toBeTruthy();
+      expect(tracked(mocks)).toEqual([{ name: "asset_preview" }]);
+
+      fireEvent.click(gearRow());
+      setUsage({ mocks });
+      rerender(<App />);
+      fireEvent.scroll(screen.getByRole("table").parentElement!);
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.getByText("hello preview")).toBeTruthy();
+      expect(actions.previewAsset).toHaveBeenCalledTimes(1);
+      expect(tracked(mocks)).toEqual([{ name: "asset_preview" }]);
+    });
+  });
+});
+
+describe("usage install gate", () => {
+  useUsageEnvironment();
+  const installButton = () => {
+    const dialog = screen.getAllByRole("dialog").find((candidate) => within(candidate).queryByRole("button", { name: /download and install/i }));
+    expect(dialog).toBeDefined();
+    return { dialog: dialog!, button: within(dialog!).getByRole<HTMLButtonElement>("button", { name: /download and install/i }) };
+  };
+  async function openUpdate() {
+    vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({ status: "available", version: "0.5.0", notes: "Release notes" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /update available/i })).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: /update available/i }));
+  }
+
+  it("blocks during a consent save and while the opt-out is not saved, then allows again once saved", async () => {
+    const mocks = usageMocks();
+    vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({ status: "available", version: "0.5.0", notes: "Release notes" });
+    setUsage({ usage: sharingUsage, mocks });
+    const { rerender } = render(<App />);
+    await openUpdate();
+    expect(installButton().button.disabled).toBe(false);
+
+    setUsage({ usage: sharingUsage, savingUsage: true, mocks });
+    rerender(<App />);
+    expect(installButton().button.disabled).toBe(true);
+    expect(within(installButton().dialog).getByText(/Saving usage data choice/)).toBeTruthy();
+
+    setUsage({ usage: sharingUsage, mocks });
+    rerender(<App />);
+    expect(installButton().button.disabled).toBe(false);
+
+    setUsage({ usage: notSavedUsage, mocks });
+    rerender(<App />);
+    const blocked = installButton();
+    expect(blocked.button.disabled).toBe(true);
+    expect(blocked.dialog.textContent).toContain('Save "off"');
+    expect(blocked.dialog.textContent).toContain("Usage data is off but not saved");
+
+    setUsage({ usage: offUsage, mocks });
+    rerender(<App />);
+    expect(installButton().button.disabled).toBe(false);
+  });
+
+  it("blocks while the consent dialog is open", async () => {
+    const mocks = usageMocks();
+    vi.spyOn(appUpdatesModule, "checkForUpdates").mockResolvedValue({ status: "available", version: "0.5.0", notes: "Release notes" });
+    setUsage({ usage: undecidedUsage, mocks });
+    render(<App />);
+    expect(firstAskDialog()).toBeTruthy();
+    await openUpdate();
+    expect(installButton().button.disabled).toBe(true);
+    expect(installButton().dialog.textContent).toContain("Usage data dialog open");
   });
 });

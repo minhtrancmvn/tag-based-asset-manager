@@ -2,8 +2,9 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   AppError, AppTheme, Asset, AssetAction, BulkTagResult, BulkTagTarget, ExportResult, LibraryState,
   PreviewResult, RenameApplyResult, RenamePreviewOutcome, RenamePreviewRequest, ScanProgress, ScanResult,
-  SearchFilters, TrashResult, ValidationReport,
+  SearchFilters, TrashResult, UsageConsentResult, ValidationReport,
 } from "./types";
+import type { UsageEvent } from "./usage";
 
 export interface LibraryClient {
   isDesktop: boolean;
@@ -29,6 +30,8 @@ export interface LibraryClient {
   removeMissingEntry: (libraryId: string, assetId: string, expectedRevision: string) => Promise<ScanResult>;
   previewTagRename: (request: RenamePreviewRequest, onProgress: (progress: ScanProgress) => void) => Promise<RenamePreviewOutcome>;
   applyTagRename: (libraryId: string, previewId: string) => Promise<RenameApplyResult>;
+  setUsageConsent: (consent: "granted" | "declined") => Promise<UsageConsentResult>;
+  trackUsage: (event: UsageEvent) => Promise<void>;
 }
 
 export function toAppError(value: unknown): AppError {
@@ -75,4 +78,6 @@ export const nativeClient: LibraryClient = {
   },
   // Native command arrives in T9/T11 backend tasks; exact IPC name and argument shape:
   applyTagRename: (libraryId, previewId) => invoke<RenameApplyResult>("apply_tag_rename", { libraryId, previewId }),
+  setUsageConsent: (consent) => invoke<UsageConsentResult>("set_usage_consent", { consent }),
+  trackUsage: (event) => invoke<void>("track_usage", { event }),
 };

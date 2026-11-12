@@ -49,7 +49,7 @@ fn configured_key() -> Option<&'static str> {
 }
 
 /// Microsoft Store packages are compiled with this set to `1`; the Store delivers their updates.
-fn store_build() -> bool {
+pub(crate) fn store_build() -> bool {
     option_env!("TAG_ASSET_MANAGER_STORE_BUILD").is_some_and(|value| value.trim() == "1")
 }
 

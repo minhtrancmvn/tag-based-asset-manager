@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Asset, PreviewResult } from "../types";
 
 interface AssetPreviewProps {
@@ -6,12 +6,22 @@ interface AssetPreviewProps {
   libraryId: string;
   disabled: boolean;
   load: (asset: Asset) => Promise<PreviewResult | null>;
+  /** Called when an image has loaded or text has rendered; never on error or for unsupported previews. */
+  onShown?: (kind: "image" | "text") => void;
 }
 
-export function AssetPreview({ asset, libraryId, disabled, load }: AssetPreviewProps) {
+export function AssetPreview({ asset, libraryId, disabled, load, onShown }: AssetPreviewProps) {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Kept in a ref so a new callback never restarts the preview load.
+  const onShownRef = useRef(onShown);
+  onShownRef.current = onShown;
+  const textShown = !disabled && asset.status !== "missing" && asset.kind !== "folder" && !loading && !error && preview?.kind === "text" && preview.content !== null;
+
+  useEffect(() => {
+    if (textShown) onShownRef.current?.("text");
+  }, [textShown]);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +48,7 @@ export function AssetPreview({ asset, libraryId, disabled, load }: AssetPreviewP
           : disabled ? <p>Preview unavailable while another operation is running.</p>
             : loading ? <p role="status">Loading preview…</p>
               : error ? <p role="alert">{error}</p>
-                : preview?.kind === "image" && preview.content ? <img src={preview.content} alt={`Preview of ${asset.name}`} onError={() => setError("Image could not be decoded.")} />
+                : preview?.kind === "image" && preview.content ? <img src={preview.content} alt={`Preview of ${asset.name}`} onLoad={() => onShownRef.current?.("image")} onError={() => setError("Image could not be decoded.")} />
                   : preview?.kind === "text" && preview.content !== null ? <><pre>{preview.content || "Empty file."}</pre>{preview.truncated && <p>Showing first 64 KiB.</p>}</>
                     : <p>{preview?.message ?? "No preview available for this file."}</p>}
     </section>

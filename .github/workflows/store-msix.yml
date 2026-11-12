@@ -52,9 +52,17 @@ jobs:
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Check usage endpoint
+        env:
+          TAG_ASSET_MANAGER_USAGE_ENDPOINT: ${{ vars.USAGE_ENDPOINT }}
+        run: |
+          node scripts/check-usage-endpoint.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build Store executable
         env:
           TAG_ASSET_MANAGER_STORE_BUILD: '1'
+          TAG_ASSET_MANAGER_USAGE_ENDPOINT: ${{ vars.USAGE_ENDPOINT }}
         run: |
           if ($env:TAURI_UPDATER_PUBLIC_KEY) { throw 'The Store build must not embed the GitHub updater key' }
           pnpm tauri build --no-bundle --ci --config src-tauri/store/tauri.store.json -- --locked

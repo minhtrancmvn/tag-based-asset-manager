@@ -1,0 +1,79 @@
+{
+  "events": [
+    "app_open",
+    "tag_edit",
+    "bulk_tag_edit",
+    "tag_rename",
+    "saved_search_save",
+    "saved_search_apply",
+    "saved_search_delete",
+    "asset_preview",
+    "metadata_export",
+    "asset_reconnect",
+    "missing_entry_remove",
+    "asset_trash",
+    "asset_open",
+    "asset_reveal",
+    "path_copy",
+    "library_add",
+    "library_remove",
+    "library_switch",
+    "library_scanned",
+    "folder_navigate",
+    "search_used",
+    "tag_filter_click",
+    "filter_change",
+    "sort_change",
+    "details_panel_close",
+    "theme_change"
+  ],
+  "extraParams": {
+    "theme_change": "theme",
+    "library_scanned": "size_range"
+  },
+  "themes": [
+    "workshop",
+    "coral",
+    "lavender",
+    "ocean",
+    "mint",
+    "sunset",
+    "stone",
+    "midnight",
+    "rose",
+    "peach",
+    "ember",
+    "amber",
+    "meadow",
+    "lagoon",
+    "glacier",
+    "sky",
+    "cobalt",
+    "iris",
+    "plum",
+    "aurora"
+  ],
+  "sizeRanges": [
+    "under_100",
+    "100_1k",
+    "1k_10k",
+    "10k_100k",
+    "over_100k"
+  ],
+  "editions": [
+    "github",
+    "store"
+  ],
+  "operatingSystems": [
+    "macOS",
+    "Windows",
+    "Linux"
+  ],
+  "commonParams": [
+    "session_id",
+    "engagement_time_msec",
+    "app_version",
+    "edition",
+    "operating_system"
+  ]
+}

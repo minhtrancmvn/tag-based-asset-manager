@@ -1,0 +1,498 @@
+{
+  "app_open": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "app_open",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "tag_edit": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "tag_edit",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "bulk_tag_edit": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "bulk_tag_edit",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "tag_rename": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "tag_rename",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "saved_search_save": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "saved_search_save",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "saved_search_apply": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "saved_search_apply",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "saved_search_delete": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "saved_search_delete",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "asset_preview": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "asset_preview",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "metadata_export": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "metadata_export",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "asset_reconnect": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "asset_reconnect",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "missing_entry_remove": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "missing_entry_remove",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "asset_trash": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "asset_trash",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "asset_open": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "asset_open",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "asset_reveal": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "asset_reveal",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "path_copy": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "path_copy",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "library_add": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "library_add",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "library_remove": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "library_remove",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "library_switch": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "library_switch",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "library_scanned": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "library_scanned",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS",
+          "size_range": "1k_10k"
+        }
+      }
+    ]
+  },
+  "folder_navigate": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "folder_navigate",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "search_used": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "search_used",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "tag_filter_click": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "tag_filter_click",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "filter_change": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "filter_change",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "sort_change": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "sort_change",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "details_panel_close": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "details_panel_close",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS"
+        }
+      }
+    ]
+  },
+  "theme_change": {
+    "client_id": "00000000-0000-4000-8000-000000000000",
+    "device": {
+      "category": "desktop",
+      "operating_system": "macOS"
+    },
+    "events": [
+      {
+        "name": "theme_change",
+        "params": {
+          "session_id": "1700000000",
+          "engagement_time_msec": 1000,
+          "app_version": "1.2.3",
+          "edition": "github",
+          "operating_system": "macOS",
+          "theme": "workshop"
+        }
+      }
+    ]
+  }
+}

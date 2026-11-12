@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { addRequiredTag, formatDate, formatSize, matchesAsset, parseQuery, sortAssets, tagGroup } from "./catalog";
 import { useLibrary } from "./useLibrary";
-import type { Asset, KindFilter, LibrarySummary, SavedSearch, SearchFilters, SortDirection, SortKey, TagMatchMode, ViewKey } from "./types";
+import type { Asset, KindFilter, LibrarySummary, SavedSearch, SearchFilters, SortDirection, SortKey, TagMatchMode, UsageConsentResult, UsageSummary, ViewKey } from "./types";
 import { TagEditor } from "./components/TagEditor";
 import { folderBreadcrumbs, folderIndex, parentFolder } from "./folderBrowse";
 import { RecoveryDialog } from "./components/RecoveryDialog";
@@ -21,6 +21,8 @@ import { AssetPreview } from "./components/AssetPreview";
 import { ThemeSettings } from "./components/ThemeSettings";
 import { AppUpdates } from "./components/AppUpdates";
 import { TagRenameDialog } from "./components/TagRenameDialog";
+import { UsageConsentDialog } from "./components/UsageConsentDialog";
+import type { UsageMessage, UsageMessageId } from "./components/UsageConsentDialog";
 import type { RenameOutcomeReport } from "./components/TagRenameDialog";
 import { LibraryPicker } from "./components/LibraryPicker";
 import { SelectMenu } from "./components/SelectMenu";
@@ -101,6 +103,25 @@ function renameNoticeText(report: RenameOutcomeReport): string {
   return `Tag rename saved, but saved searches were not updated: ${from} to ${to}. Saved searches and the active query still use the old name. Retry works only until the app closes.${detail}`;
 }
 
+/** Which design-table message a non-saved consent result shows, from the dialog mode, the state before the save, the requested choice and the result. */
+function usageMessageId(mode: "first" | "review", before: UsageSummary, requested: "granted" | "declined", result: UsageConsentResult): UsageMessageId | null {
+  if (result.status === "saved") return null;
+  if (result.status === "stoppedNotSaved") return result.reason === "busy" ? "stoppedBusy" : "stoppedFailed";
+  if (requested === "granted") {
+    if (mode === "first" || before.consent === "undecided") return result.status === "busy" ? "busyAsk" : "failedAsk";
+    return result.status === "busy" ? "busyTurnOn" : "failedTurnOn";
+  }
+  if (mode === "first" || before.consent === "undecided") return result.status === "busy" ? "busyAsk" : "failedAsk";
+  // Turning off from sharing or from the not-saved row: native never returns busy or plain failed there, so this is a rejected invoke.
+  return "unreachableTurnOff";
+}
+
+/** Status-region text for a saved consent result; "turned" when the user was sharing or not sharing, "is" when they had not chosen. */
+function usageSavedText(before: UsageSummary, savedConsent: "granted" | "declined"): string {
+  const state = savedConsent === "granted" ? "on" : "off";
+  return before.consent === "undecided" ? `Usage data is ${state}.` : `Usage data turned ${state}.`;
+}
+
 function AssetIcon({ asset, size = 17 }: { asset: Asset; size?: number }) {
   const props = { size, strokeWidth: 1.7, "aria-hidden": true as const };
   if (asset.kind === "folder") return <Folder {...props} className="icon-folder" />;
@@ -126,7 +147,7 @@ function App() {
     bulkEditTags, bulkEditing, savedSearches, savingSearch, saveSearch, deleteSearch,
     performAction, actionBusy, validateMetadata, validation, exportMetadata, exportResult,
     getReconnectTargets, reconnectAsset, removeMissingEntry, recoveryBusy, deleteAssets, deleting, previewAsset,
-    theme, savingTheme, setTheme,
+    theme, savingTheme, setTheme, savingUsage, setUsageConsent, trackUsage,
     previewTagRename, cancelTagRenamePreview, applyTagRename, renamePreviewing, renameApplying, renameProgress,
   } = useLibrary();
   const [view, setView] = useState<ViewKey>("all");
@@ -174,8 +195,22 @@ function App() {
   latestQuery.current = query;
   const [deleteTargets, setDeleteTargets] = useState<Asset[] | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const usage = state.usage;
+  const [usageDialog, setUsageDialog] = useState<"first" | "review" | null>(null);
+  const [usageMessage, setUsageMessage] = useState<UsageMessage | null>(null);
+  const [usageStatus, setUsageStatus] = useState("");
+  // Session-only: set when the first ask was answered or dismissed. Never persisted.
+  const [firstAskDone, setFirstAskDone] = useState(false);
+  const usageAttempt = useRef(0);
+  const searchTimer = useRef<number | null>(null);
+  const previewReported = useRef<string | null>(null);
+  const inspectorOpenRef = useRef(true);
+  const previewKeyRef = useRef<string | null>(null);
   const appShellRef = useRef<HTMLDivElement>(null);
-  const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || savingTheme || actionBusy || recoveryBusy || deleting || installingUpdate || renamePreviewing || renameApplying);
+  const busy = Boolean(loading || scanning || editingAssetId !== null || bulkEditing || savingSearch || savingTheme || savingUsage || actionBusy || recoveryBusy || deleting || installingUpdate || renamePreviewing || renameApplying);
+
+  const usageUnsaved = usage?.saved === false;
 
   const updateBlockedReason = useMemo(() => {
     if (scanning) return "Scan in progress. Stop scan before updating.";
@@ -190,12 +225,15 @@ function App() {
     if (recovery !== null || recoveryBusy) return "Metadata reconnect open. Confirm or cancel before updating.";
     if (actionBusy) return "File action in progress. Wait before updating.";
     if (savingTheme) return "Saving theme. Wait before updating.";
+    if (savingUsage) return "Saving usage data choice. Wait before updating.";
+    if (usageDialog !== null) return "Usage data dialog open. Close it before updating.";
+    if (usageUnsaved) return "Usage data is off but not saved. Choose Save \"off\" under Usage data first, or sharing will turn back on after the update restarts the app.";
     // Rename reasons come last so every fixed check above keeps its own message.
     if (renamePreviewing || renameApplying) return "Tag rename in progress. Wait for it to finish before updating.";
     if (tagRenameRequest !== null) return "Tag rename dialog open. Finish or cancel the rename before updating.";
     if (renameNotices.length > 0) return "Tag rename not finished. Retry it or resolve the rename notice before updating.";
     return null;
-  }, [scanning, loading, editingNotesAssetId, notesDraft, editingAssetId, bulkTargets, bulkEditing, savedSearchDialogOpen, savingSearch, deleteTargets, deleting, removal, recovery, recoveryBusy, actionBusy, savingTheme, renamePreviewing, renameApplying, tagRenameRequest, renameNotices]);
+  }, [scanning, loading, editingNotesAssetId, notesDraft, editingAssetId, bulkTargets, bulkEditing, savedSearchDialogOpen, savingSearch, deleteTargets, deleting, removal, recovery, recoveryBusy, actionBusy, savingTheme, savingUsage, usageDialog, usageUnsaved, renamePreviewing, renameApplying, tagRenameRequest, renameNotices]);
 
   const getUpdateBlockedReason = useCallback(() => {
     if (updateBlockedReason) return updateBlockedReason;
@@ -209,6 +247,15 @@ function App() {
     }
     return null;
   }, [updateBlockedReason]);
+
+  // First ask: opens once per session when native reports an undecided choice and nothing else is on screen.
+  // Once open it stays until a saved result or Close, so it is never recomputed from consent while open.
+  const otherDialogOpen = bulkTargets !== null || savedSearchDialogOpen || deleteTargets !== null || libraryRemoval !== null || removal !== null
+    || recovery !== null || tagRenameRequest !== null || updateDialogOpen || installingUpdate;
+  const firstAskDue = isDesktop && usage?.available === true && usage.consent === "undecided" && !firstAskDone && usageDialog === null && !otherDialogOpen;
+  useEffect(() => {
+    if (firstAskDue) openUsageDialog("first");
+  }, [firstAskDue]);
 
   useEffect(() => {
     let mounted = true;
@@ -239,6 +286,8 @@ function App() {
     setDeleteTargets(null);
     ++reconnectRequest.current;
   }, [library?.id]);
+
+  useEffect(() => () => { if (searchTimer.current !== null) window.clearTimeout(searchTimer.current); }, []);
 
   // Leaving a library stops a native preview still scanning for it; the hook drops that result either way.
   useEffect(() => () => { void cancelTagRenamePreview(); }, [library?.id, cancelTagRenamePreview]);
@@ -367,6 +416,11 @@ function App() {
   }, [directChildren, query, view, matchMode, kindFilter, sortKey, sortDirection]);
   const breadcrumbs = useMemo(() => folderBreadcrumbs(currentFolder), [currentFolder]);
   const selected = assetsById.get(selectedIds[selectedIds.length - 1]) ?? null;
+  const previewKey = library && selected ? `${library.id}:${selected.id}` : null;
+  previewKeyRef.current = previewKey;
+  inspectorOpenRef.current = inspectorOpen;
+  // A new selection may report its preview again.
+  useEffect(() => { previewReported.current = null; }, [previewKey]);
   const selectedAssets = useMemo(() => selectedIds.map((id) => assetsById.get(id)).filter((asset): asset is Asset => asset !== undefined), [selectedIds, assetsById]);
   const notesDraftBytes = useMemo(() => notesDraft ? new TextEncoder().encode(notesDraft.value).length : 0, [notesDraft?.value]);
   const windowSize = Math.ceil(tableHeight / rowHeight) + overscanRows * 2;
@@ -478,6 +532,7 @@ function App() {
 
   function navigateFolder(path: string) {
     if (busy || path === currentFolder || (path && !foldersByPath.has(path))) return;
+    trackUsage({ name: "folder_navigate" });
     setCurrentFolder(path);
     setSelectedIds([]);
     setAnchorId(null);
@@ -507,12 +562,14 @@ function App() {
   }
 
   function changeSort(key: SortKey) {
+    trackUsage({ name: "sort_change" });
     if (sortKey === key) setSortDirection((current) => current === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDirection("asc"); }
   }
 
   function loadSavedSearch(search: SavedSearch) {
     if (search.libraryId !== library?.id) return;
+    trackUsage({ name: "saved_search_apply" });
     setQuery(search.filters.query);
     setView(search.filters.view);
     setMatchMode(search.filters.matchMode);
@@ -522,9 +579,59 @@ function App() {
   }
 
   function addFilter(tag: string) {
+    trackUsage({ name: "tag_filter_click" });
     // Decide from the latest query, not this render's copy: two clicks can land before the next render.
     setQuery((current) => addRequiredTag(current, tag));
     setView("all");
+  }
+
+  function changeSearchText(text: string): void {
+    setQuery(text);
+    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
+    searchTimer.current = null;
+    if (text.length === 0) return;
+    // Counts typing only, and only text that is still there after 2 s; the event never carries the text.
+    searchTimer.current = window.setTimeout(() => {
+      searchTimer.current = null;
+      if (latestQuery.current.length > 0) trackUsage({ name: "search_used" });
+    }, 2000);
+  }
+
+  const showPreviewUsed = useCallback((): void => {
+    const key = previewKeyRef.current;
+    if (key === null || previewReported.current === key || !inspectorOpenRef.current) return;
+    if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 1024px)").matches) return;
+    previewReported.current = key;
+    trackUsage({ name: "asset_preview" });
+  }, [trackUsage]);
+
+  function openUsageDialog(mode: "first" | "review"): void {
+    setUsageMessage(null);
+    setUsageStatus("");
+    setUsageDialog(mode);
+  }
+
+  function closeUsageDialog(): void {
+    if (savingUsage) return;
+    if (usageDialog === "first") setFirstAskDone(true);
+    setUsageMessage(null);
+    setUsageDialog(null);
+  }
+
+  async function chooseUsage(requested: "granted" | "declined"): Promise<void> {
+    const mode = usageDialog;
+    const before = usage;
+    if (!mode || !before || savingUsage) return;
+    setUsageMessage(null);
+    const result = await setUsageConsent(requested);
+    if (result.status === "saved") {
+      setUsageStatus(usageSavedText(before, result.usage?.consent === "granted" ? "granted" : result.usage?.consent === "declined" ? "declined" : requested));
+      if (mode === "first") setFirstAskDone(true);
+      setUsageDialog(null);
+      return;
+    }
+    const id = usageMessageId(mode, before, requested, result);
+    if (id) setUsageMessage({ id, attempt: ++usageAttempt.current });
   }
 
   function beginResize(event: MouseEvent<HTMLSpanElement>, key: string) {
@@ -804,7 +911,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           {!sidebarOpen && <span className="collapsed-library-context" title={library?.rootPath}>{library?.name ?? "No library selected"}</span>}
-          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><AppUpdates enabled={isDesktop} blockedReason={updateBlockedReason} getBlockedReason={getUpdateBlockedReason} onInstallingChange={setInstallingUpdate} /><span className="topbar-version" aria-label={`Application version: ${appVersion}`}>{appVersion}</span><span className="topbar-info"><span className="offline-dot" /> Local files · explicit actions only</span></div>
+          <div className="topbar-right"><ThemeSettings theme={theme} saving={savingTheme} disabled={!isDesktop || busy} onThemeChange={setTheme} /><AppUpdates enabled={isDesktop} blockedReason={updateBlockedReason} getBlockedReason={getUpdateBlockedReason} onInstallingChange={setInstallingUpdate} onOpenChange={setUpdateDialogOpen} />{usage?.available && <button type="button" className="quiet-button" aria-haspopup="dialog" onClick={() => { if (usageDialog === null) openUsageDialog("review"); }}>{`Usage data: ${!usage.saved ? "Off (not saved)" : usage.consent === "granted" ? "On" : "Off"}`}</button>}<div className="sr-only" aria-live="polite" aria-atomic="true">{usageStatus}</div><span className="topbar-version" aria-label={`Application version: ${appVersion}`}>{appVersion}</span><span className="topbar-info">{usage?.available && usage.consent === "granted" ? "Local files · sharing usage data" : <><span className="offline-dot" /> Local files · explicit actions only</>}</span></div>
         </header>
 
         <div className="page-content">
@@ -828,7 +935,7 @@ function App() {
               <div className="toolbar-title">{library && <button type="button" className="folder-up icon-button" onClick={navigateUp} disabled={!currentFolder || busy} aria-label="Go up one folder" title="Go up one folder"><ArrowUp size={16} /></button>}{library && <nav className="folder-breadcrumbs" aria-label="Folder path"><button type="button" onClick={() => navigateFolder("")} aria-current={!currentFolder ? "location" : undefined}>Library</button>{breadcrumbs.map((crumb) => <span key={crumb.path} className="breadcrumb-segment"><span aria-hidden="true">/</span><button type="button" onClick={() => navigateFolder(crumb.path)} aria-current={crumb.path === currentFolder ? "location" : undefined}>{crumb.name}</button></span>)}</nav>}</div>
               <div className="toolbar-actions">{library && <><button className="quiet-button" type="button" disabled={busy} onClick={() => void exportMetadata()} title="Export selected library metadata as JSON backup"><Download size={15} /> Export JSON</button></>}{library && <button className="quiet-button" type="button" disabled={busy} onClick={() => void rescan()} title="Rescan this approved library"><RotateCw size={15} /> Rescan</button>}<div className="column-menu-wrap"><button className="quiet-button" type="button" onClick={() => setColumnMenuOpen(!columnMenuOpen)} aria-expanded={columnMenuOpen} aria-label="Choose visible columns"><Columns3 size={16} /> Columns</button>{columnMenuOpen && <div className="column-menu"><strong>Visible columns</strong><p>Name and Tags stay visible.</p>{(["path", "modified", "size", "status"] as const).map((key) => <label key={key}><input type="checkbox" checked={visibleColumns[key]} onChange={() => setVisibleColumns((current) => ({ ...current, [key]: !current[key] }))} /> {key[0].toUpperCase() + key.slice(1)}</label>)}</div>}</div></div>
             </div>
-            <div className="filter-bar"><label className="search-field"><Search size={18} aria-hidden="true" /><span className="sr-only">Search assets and tags</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={'Tags, -tag to exclude, "text" in paths'} disabled={!library} />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}</label><div className="filter-selector"><span>Match</span><SelectMenu className="filter-menu" label="Required tag match" listLabel="Required tag matching" options={[{ value: "all", label: "All tags" }, { value: "any", label: "Any tag" }]} value={matchMode} onChange={(value) => setMatchMode(value as TagMatchMode)} disabled={!library} /></div><div className="filter-selector"><span>Kind</span><SelectMenu className="filter-menu" label="Asset kind" listLabel="Asset kinds" options={[{ value: "all", label: "Files & folders" }, { value: "file", label: "Files" }, { value: "folder", label: "Folders" }]} value={kindFilter} onChange={(value) => setKindFilter(value as KindFilter)} disabled={!library} /></div><button className="quiet-button save-current-button" type="button" disabled={!library || busy} onClick={() => setSavedSearchDialogOpen(true)}>Save search</button></div>
+            <div className="filter-bar"><label className="search-field"><Search size={18} aria-hidden="true" /><span className="sr-only">Search assets and tags</span><input value={query} onChange={(event) => changeSearchText(event.target.value)} placeholder={'Tags, -tag to exclude, "text" in paths'} disabled={!library} />{query && <button className="clear-search" type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}</label><div className="filter-selector"><span>Match</span><SelectMenu className="filter-menu" label="Required tag match" listLabel="Required tag matching" options={[{ value: "all", label: "All tags" }, { value: "any", label: "Any tag" }]} value={matchMode} onChange={(value) => { setMatchMode(value as TagMatchMode); trackUsage({ name: "filter_change" }); }} disabled={!library} /></div><div className="filter-selector"><span>Kind</span><SelectMenu className="filter-menu" label="Asset kind" listLabel="Asset kinds" options={[{ value: "all", label: "Files & folders" }, { value: "file", label: "Files" }, { value: "folder", label: "Folders" }]} value={kindFilter} onChange={(value) => { setKindFilter(value as KindFilter); trackUsage({ name: "filter_change" }); }} disabled={!library} /></div><button className="quiet-button save-current-button" type="button" disabled={!library || busy} onClick={() => setSavedSearchDialogOpen(true)}>Save search</button></div>
             {(query || matchMode !== "all" || kindFilter !== "all") && <div className="active-query"><span>Filter</span><code>{query || "No tag query"}{matchMode === "any" ? " · any required tag" : " · all required tags"} · {kindFilter === "all" ? "files and folders" : `${kindFilter}s`}</code><button type="button" onClick={() => { setQuery(""); setMatchMode("all"); setKindFilter("all"); }} aria-label="Clear active filter"><X size={13} /></button></div>}
             {renameNotices.length > 0 && !tagRenameRequest && <section className="rename-pending" aria-label="Unfinished tag renames">{renameNotices.map((notice) => {
               const { from, to } = renameNames(notice.report);
@@ -854,7 +961,7 @@ function App() {
         </div>
       </main>
 
-      {inspectorOpen && <aside className="inspector" aria-label="Asset details"><div className="inspector-top"><span>Details</span><button type="button" className="icon-button" onClick={() => setInspectorOpen(false)} title="Hide details" aria-label="Hide details"><PanelRightClose size={17} /></button></div>{selected ? <div className="inspector-body"><div className="inspector-icon"><AssetIcon asset={selected} size={26} /></div><div className="inspector-label">{selected.kind === "folder" ? "Folder" : `${selected.extension?.toUpperCase() ?? "Unknown"} file`}</div><h2 title={selected.name}>{selected.name}</h2><p className="inspector-description">{selected.relativePath}</p>{library && <AssetPreview key={`${library.id}:${selected.id}`} asset={selected} libraryId={library.id} disabled={!isDesktop || busy} load={previewAsset} />}{selectedIds.length > 1 && <div className="selection-note">{selectedIds.length} rows selected · showing most recent</div>}<div className="detail-divider" /><div className="detail-heading"><span>Tags</span><span className="tag-count">{selected.tags.length}</span></div><div className="inspector-tags">{selected.tags.length ? selected.tags.map((tag) => <button className="tag-chip" key={tag} type="button" onClick={() => addFilter(tag)} title={`Filter by ${tag}`}>{tag}</button>) : <span className="empty-inspector-tags">{selected.metadataState === "blocked" ? "Tags unavailable while metadata has an issue." : "No tags yet."}</span>}</div>{selected.metadataState === "blocked" && <p className="metadata-warning" role="status"><CircleAlert size={13} /> Metadata needs attention. Tag editing is disabled until issue is resolved.</p>}{selected.metadataId && <p className="metadata-id">Metadata ID · {selected.metadataId}</p>}{<div className="notes-section"><div className="detail-heading notes-heading"><span>Notes</span>{(!notesDraft || notesDraft.key !== JSON.stringify([library?.id, selected.id, selected.metadataRevision])) && selected.status !== "missing" && selected.metadataState === "valid" && selected.metadataId && selectedIds.length <= 1 && <button type="button" className="notes-edit-button" disabled={!isDesktop || busy} onClick={() => beginNotesEdit(selected)}>Edit notes</button>}</div>{notesDraft?.key === JSON.stringify([library?.id, selected.id, selected.metadataRevision]) ? <div className="notes-editor"><label className="sr-only" htmlFor="asset-notes-editor">Notes</label><textarea id="asset-notes-editor" aria-label="Notes" maxLength={64 * 1024} value={notesDraft.value} disabled={Boolean(editingNotesAssetId)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelNotesEdit(); } }} onChange={(event) => { setNotesDraft({ ...notesDraft, value: event.target.value }); }} /><div className="notes-editor-meta"><span>{notesDraftBytes.toLocaleString()} / 65,536 UTF-8 bytes</span>{notesDraftBytes > 64 * 1024 && <span role="alert">Notes exceed the 64 KiB UTF-8 limit.</span>}</div><div className="notes-editor-actions"><button type="button" className="quiet-button" aria-label="Cancel notes" disabled={Boolean(editingNotesAssetId)} onClick={cancelNotesEdit}>Cancel</button><button type="button" className="primary-button" aria-label="Save notes" disabled={Boolean(editingNotesAssetId) || notesDraftBytes > 64 * 1024} onClick={() => void saveNotesEdit(selected)}>{editingNotesAssetId === selected.id ? "Saving…" : "Save"}</button></div></div> : selected.notes ? <p className="notes-text">{selected.notes}</p> : <p className="notes-empty">{selected.status === "missing" ? "Notes unavailable while asset is missing." : selected.metadataState === "blocked" ? "Notes unavailable while metadata has an issue." : selected.metadataState === "valid" && selected.metadataId ? "No notes yet." : "Save metadata first to add notes."}</p>}</div>}<div className="detail-divider" /><div className="detail-heading">File details</div><dl className="detail-list"><div><dt>Location</dt><dd title={selected.relativePath}>{selected.relativePath}</dd></div><div><dt>Modified</dt><dd>{formatDate(selected.modifiedAt)}</dd></div><div><dt>Size</dt><dd>{selected.kind === "folder" ? "—" : formatSize(selected.sizeBytes)}</dd></div><div><dt>Scan state</dt><dd><Status asset={selected} /></dd></div></dl><div className="inspector-actions"><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "Missing asset cannot be opened" : "Open with system default application"} onClick={() => void runAction(selected, "open")}><ExternalLink size={14} /> Open</button><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "Missing asset cannot be revealed" : "Reveal in file manager"} onClick={() => void runAction(selected, "reveal")}><FolderSearch size={14} /> Reveal</button><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "Full path unavailable for missing asset" : "Copy full path"} onClick={() => void runAction(selected, "copyFullPath")}><Copy size={14} /> Full path</button><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "File actions unavailable for missing asset" : "Copy path relative to library"} onClick={() => void copyRelativePath(selected)}><Copy size={14} /> Relative path</button>{selected.status === "missing" && <button type="button" disabled={busy || selected.metadataState !== "valid" || !selected.metadataId || !selected.metadataRevision} onClick={() => void beginReconnect(selected)}><Wrench size={14} /> Reconnect metadata</button>}{selected.status === "missing" && <button type="button" className="inspector-danger" disabled={busy || selected.metadataState !== "valid" || !selected.metadataId || !selected.metadataRevision} title="Remove this entry's tags and notes from the folder's metadata" onClick={() => beginRemoveMissing(selected)}><Trash2 size={14} /> Remove missing entry</button>}{selected.relativePath !== "." && selected.status !== "missing" && <button type="button" className="inspector-danger" disabled={busy || !isDesktop || selected.metadataState === "blocked"} title="Move this item to Trash / Recycle Bin" onClick={() => requestDelete(selected, false)}><Trash2 size={14} /> Delete this item</button>}</div>{selected.status === "missing" && <p className="metadata-warning">This entry points to a missing file. Reconnect it to a renamed file, or remove the entry if the file was deleted on purpose.</p>}</div> : <div className="inspector-empty"><div className="empty-outline"><Tag size={24} /></div><strong>Nothing selected</strong><p>Select a row to see its tags, notes and file details.</p></div>}</aside>}
+      {inspectorOpen && <aside className="inspector" aria-label="Asset details"><div className="inspector-top"><span>Details</span><button type="button" className="icon-button" onClick={() => { setInspectorOpen(false); trackUsage({ name: "details_panel_close" }); }} title="Hide details" aria-label="Hide details"><PanelRightClose size={17} /></button></div>{selected ? <div className="inspector-body"><div className="inspector-icon"><AssetIcon asset={selected} size={26} /></div><div className="inspector-label">{selected.kind === "folder" ? "Folder" : `${selected.extension?.toUpperCase() ?? "Unknown"} file`}</div><h2 title={selected.name}>{selected.name}</h2><p className="inspector-description">{selected.relativePath}</p>{library && <AssetPreview key={`${library.id}:${selected.id}`} asset={selected} libraryId={library.id} disabled={!isDesktop || busy} load={previewAsset} onShown={showPreviewUsed} />}{selectedIds.length > 1 && <div className="selection-note">{selectedIds.length} rows selected · showing most recent</div>}<div className="detail-divider" /><div className="detail-heading"><span>Tags</span><span className="tag-count">{selected.tags.length}</span></div><div className="inspector-tags">{selected.tags.length ? selected.tags.map((tag) => <button className="tag-chip" key={tag} type="button" onClick={() => addFilter(tag)} title={`Filter by ${tag}`}>{tag}</button>) : <span className="empty-inspector-tags">{selected.metadataState === "blocked" ? "Tags unavailable while metadata has an issue." : "No tags yet."}</span>}</div>{selected.metadataState === "blocked" && <p className="metadata-warning" role="status"><CircleAlert size={13} /> Metadata needs attention. Tag editing is disabled until issue is resolved.</p>}{selected.metadataId && <p className="metadata-id">Metadata ID · {selected.metadataId}</p>}{<div className="notes-section"><div className="detail-heading notes-heading"><span>Notes</span>{(!notesDraft || notesDraft.key !== JSON.stringify([library?.id, selected.id, selected.metadataRevision])) && selected.status !== "missing" && selected.metadataState === "valid" && selected.metadataId && selectedIds.length <= 1 && <button type="button" className="notes-edit-button" disabled={!isDesktop || busy} onClick={() => beginNotesEdit(selected)}>Edit notes</button>}</div>{notesDraft?.key === JSON.stringify([library?.id, selected.id, selected.metadataRevision]) ? <div className="notes-editor"><label className="sr-only" htmlFor="asset-notes-editor">Notes</label><textarea id="asset-notes-editor" aria-label="Notes" maxLength={64 * 1024} value={notesDraft.value} disabled={Boolean(editingNotesAssetId)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelNotesEdit(); } }} onChange={(event) => { setNotesDraft({ ...notesDraft, value: event.target.value }); }} /><div className="notes-editor-meta"><span>{notesDraftBytes.toLocaleString()} / 65,536 UTF-8 bytes</span>{notesDraftBytes > 64 * 1024 && <span role="alert">Notes exceed the 64 KiB UTF-8 limit.</span>}</div><div className="notes-editor-actions"><button type="button" className="quiet-button" aria-label="Cancel notes" disabled={Boolean(editingNotesAssetId)} onClick={cancelNotesEdit}>Cancel</button><button type="button" className="primary-button" aria-label="Save notes" disabled={Boolean(editingNotesAssetId) || notesDraftBytes > 64 * 1024} onClick={() => void saveNotesEdit(selected)}>{editingNotesAssetId === selected.id ? "Saving…" : "Save"}</button></div></div> : selected.notes ? <p className="notes-text">{selected.notes}</p> : <p className="notes-empty">{selected.status === "missing" ? "Notes unavailable while asset is missing." : selected.metadataState === "blocked" ? "Notes unavailable while metadata has an issue." : selected.metadataState === "valid" && selected.metadataId ? "No notes yet." : "Save metadata first to add notes."}</p>}</div>}<div className="detail-divider" /><div className="detail-heading">File details</div><dl className="detail-list"><div><dt>Location</dt><dd title={selected.relativePath}>{selected.relativePath}</dd></div><div><dt>Modified</dt><dd>{formatDate(selected.modifiedAt)}</dd></div><div><dt>Size</dt><dd>{selected.kind === "folder" ? "—" : formatSize(selected.sizeBytes)}</dd></div><div><dt>Scan state</dt><dd><Status asset={selected} /></dd></div></dl><div className="inspector-actions"><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "Missing asset cannot be opened" : "Open with system default application"} onClick={() => void runAction(selected, "open")}><ExternalLink size={14} /> Open</button><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "Missing asset cannot be revealed" : "Reveal in file manager"} onClick={() => void runAction(selected, "reveal")}><FolderSearch size={14} /> Reveal</button><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "Full path unavailable for missing asset" : "Copy full path"} onClick={() => void runAction(selected, "copyFullPath")}><Copy size={14} /> Full path</button><button type="button" disabled={busy || selected.status === "missing" || !isDesktop} title={selected.status === "missing" ? "File actions unavailable for missing asset" : "Copy path relative to library"} onClick={() => void copyRelativePath(selected)}><Copy size={14} /> Relative path</button>{selected.status === "missing" && <button type="button" disabled={busy || selected.metadataState !== "valid" || !selected.metadataId || !selected.metadataRevision} onClick={() => void beginReconnect(selected)}><Wrench size={14} /> Reconnect metadata</button>}{selected.status === "missing" && <button type="button" className="inspector-danger" disabled={busy || selected.metadataState !== "valid" || !selected.metadataId || !selected.metadataRevision} title="Remove this entry's tags and notes from the folder's metadata" onClick={() => beginRemoveMissing(selected)}><Trash2 size={14} /> Remove missing entry</button>}{selected.relativePath !== "." && selected.status !== "missing" && <button type="button" className="inspector-danger" disabled={busy || !isDesktop || selected.metadataState === "blocked"} title="Move this item to Trash / Recycle Bin" onClick={() => requestDelete(selected, false)}><Trash2 size={14} /> Delete this item</button>}</div>{selected.status === "missing" && <p className="metadata-warning">This entry points to a missing file. Reconnect it to a renamed file, or remove the entry if the file was deleted on purpose.</p>}</div> : <div className="inspector-empty"><div className="empty-outline"><Tag size={24} /></div><strong>Nothing selected</strong><p>Select a row to see its tags, notes and file details.</p></div>}</aside>}
       {!inspectorOpen && <button className="show-inspector" type="button" onClick={() => setInspectorOpen(true)} title="Show details" aria-label="Show details"><PanelRightOpen size={18} /></button>}
       {bulkTargets && <BulkTagDialog assets={bulkTargets} availableTags={availableTags} busy={bulkEditing} onCancel={() => setBulkTargets(null)} onConfirm={async (addTags, removeTags) => { const applied = await bulkEditTags(bulkTargets, addTags, removeTags); if (applied) setBulkTargets(null); return applied; }} />}
       {savedSearchDialogOpen && <SavedSearchDialog filters={currentFilters} searches={librarySavedSearches} busy={savingSearch} onCancel={() => setSavedSearchDialogOpen(false)} onSave={saveSearch} onDelete={async (search) => { const deleted = await deleteSearch(search.id); if (deleted) setSavedSearchDialogOpen(false); return deleted; }} />}
@@ -873,6 +980,7 @@ function App() {
           resume={tagRenameRequest.resume} onResolve={tagRenameRequest.resume ? () => resolveRename(tagRenameRequest) : undefined}
         />
       )}
+      {usageDialog && usage && <UsageConsentDialog mode={usageDialog} usage={usage} saving={savingUsage} message={usageMessage} onChoose={(consent) => void chooseUsage(consent)} onClose={closeUsageDialog} />}
       {deleteTargets && <DeleteAssetsDialog assets={deleteTargets} busy={deleting} onCancel={() => setDeleteTargets(null)} onConfirm={async (assets) => { const applied = await deleteAssets(assets); if (applied) { setDeleteTargets(null); setSelectedIds([]); setAnchorId(null); } return applied; }} />}
     </div>
   );

@@ -728,3 +728,19 @@ button.tag-chip:hover { filter: brightness(.96); }
   .group-swatch, .status-dot, .offline-dot { forced-color-adjust: none; background: CanvasText; }
   .asset-table tr.selected-row .row-marker span { background: Highlight; forced-color-adjust: none; }
 }
+
+/* ---------- Usage data consent dialog ---------- */
+.usage-consent-dialog:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
+/* Leave room for the 2px outline at its 2px offset when a focused button is scrolled into view. */
+.usage-consent-dialog button { scroll-margin-block: 8px; }
+.usage-consent-dialog .usage-consent-current { margin: -8px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
+.usage-consent-body { display: grid; gap: 10px; color: var(--ink); font-size: var(--fs-body); line-height: 1.5; }
+.usage-consent-body p, .usage-consent-body ul { margin: 0; }
+.usage-consent-sent { display: grid; gap: 4px; }
+.usage-consent-sent ul { display: grid; padding-left: 20px; gap: 4px; }
+.usage-consent-saving { margin: 0; color: var(--muted); font-size: var(--fs-small); }
+.usage-consent-close-row { display: flex; justify-content: flex-end; }
+.usage-consent-dialog .dialog-actions { margin-top: 0; }
+.usage-consent-dialog .secondary-button[aria-disabled="true"], .usage-consent-dialog .quiet-button[aria-disabled="true"], .usage-consent-dialog .icon-button[aria-disabled="true"] { color: var(--disabled-ink); cursor: default; }
+.usage-consent-dialog .secondary-button[aria-disabled="true"]:hover { background: var(--paper); }
+.usage-consent-dialog .quiet-button[aria-disabled="true"]:hover, .usage-consent-dialog .icon-button[aria-disabled="true"]:hover { background: transparent; }
