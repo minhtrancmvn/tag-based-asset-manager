@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Tag-based Asset Manager. Effective [release date].
+Tag-based Asset Manager. Effective November 18, 2026.
 
 Tag-based Asset Manager is a desktop app that catalogs and tags files in folders you choose. It sends no information about how you use it unless you say yes, and even then it never sends your file names, paths, tags, notes or search text. It does not sell personal data.
 
