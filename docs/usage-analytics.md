@@ -166,7 +166,7 @@ The allowlist (`usage-events.json`) only grows. Never remove or rename an event,
 
 ## Known limits
 
-- **Test events are in the production property.** There's one GA property, and the Worker strips any parameter that could mark an event as a test, so acceptance events can't be filtered out later. The [progress log](progress-log.md) lists their time windows and client IDs; add a GA annotation for each window and treat the first release date as the start of real reporting.
+- **Test events are in the production property.** There's one GA property, and the Worker strips any parameter that could mark an event as a test, so acceptance events can't be filtered out later. The [progress log](progress-log.md) lists their time windows and client IDs (the account owner chose not to add GA annotations for them); leave them out when reading reports, and treat the first release date as the start of real reporting.
 - **Single instance on macOS isn't per user.** The single-instance plugin's lock socket is in `/tmp`, so with two macOS accounts signed in at once, the second account's copy can run without the lock (a reviewer finding from the plugin source, not tested). Each account has its own settings file, so this doesn't affect anyone's usage choice.
 
 ## Checking nothing is sent without consent

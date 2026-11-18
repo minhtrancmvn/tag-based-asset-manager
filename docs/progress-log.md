@@ -535,7 +535,7 @@ Deferred:
 
 ADR decision 9 and the design say development builds stay silent. That is true only when they're compiled without the endpoint variable. Both files are hash-bound to the consultation's verdict, so the correction is in [usage analytics](usage-analytics.md) and `CLAUDE.md` instead.
 
-Test events in the production GA property, for annotations (times are UTC+7; client IDs are the random test IDs' first 8 characters):
+Test events in the production GA property (times are UTC+7; client IDs are the random test IDs' first 8 characters). The account owner chose not to add GA annotations for them, so use this table to leave them out when reading reports:
 
 | When | What | Client |
 |---|---|---|
@@ -545,8 +545,9 @@ Test events in the production GA property, for annotations (times are UTC+7; cli
 | 2026-11-12, 01:27 to 01:48 | real-endpoint build (T18) and its replay | `98dce666`, `ef3dc59d` |
 | 2026-11-12, 10:42 | one fixture `app_open` after the Worker redeploy (T17 re-check) | `7ebfbeda` |
 | 2026-11-12, 11:42 to 11:44 | real-endpoint build (T18 re-run) | `f3814da8` |
+| 2026-11-15, 11:16 to 11:19 | Windows Store test package (T21, USAGE-10, 13 and 14) | `e7320c9d`, `63a0e4c2`, `44b88e50`, `a7e75354` |
 
-Treat the first release date as the start of real reporting.
+From 2026-11-15 13:00 the property also holds `store` / `0.7.1` events from the account owner's own copy of the Windows test package, used with sharing on. They are real use, not tests, but they come before any release. Treat the first release date as the start of real reporting.
 
 Verification at the fix commit:
 - `cargo fmt --check`, and Clippy with `-D warnings` on debug and release, all targets, pass;
@@ -595,3 +596,28 @@ Run at `7ec1a96` (code unchanged since the proof commit `e7c0d47`), in the plan'
 GitNexus was re-indexed first (`CLAUDE.md` and `AGENTS.md` restored byte-for-byte afterwards). `detect_changes` against `main` rates the branch critical: 613 symbols in 45 files and 184 flows, almost all through the shared settings-save path (`load`, `mutate`, `update_locked`, `capture` and `restore`) that Wave 2 rebuilt so consent saves roll back and never block. The Rust suite covers those flows.
 
 Secret scan: the account owner ran a script that read the GA API secret from a hidden prompt and counted it in tracked files, all git history, untracked and ignored files in both checkouts, the last release build, this project's Claude Code transcripts, the session scratchpad, shell history and Wrangler local state. It found 0 matches. A canary run beforehand confirmed the script detects a match.
+
+### Windows Store package check (T21, 2026-11-13 to 2026-11-18)
+
+Run with the test-signed Store package (version 0.7.1.0) that CI built for PR #21 at `689925d` (run 43160990907), on Windows build 26300.9974. The package has the same identity as the Store listing, and the account owner's main Windows account had the Store copy installed, so the checks ran in a separate standard local account. The test certificate was added to the machine's Trusted People store, and the artifact's hash matched its `SHA256SUMS.txt`.
+
+Setup:
+- **Libraries:** a copy of the sample fixture and a disposable library of 300,000 empty files, both in the test account.
+- **No-connection rows:** `usage.minhtran.id.vn` was pinned to `192.0.2.1` and `100::1` in `hosts`, with a `pktmon` real-time capture, both started before launch.
+- **Unwritable settings:** the read-only attribute on `settings.json`.
+- **Starting undecided:** `usageConsent` was rewritten to `undecided` while the app was closed.
+
+The account owner ran the pinned rows step by step. USAGE-10, 13 and 14 ran against the real endpoint and were driven remotely: SSH with a key into the test account, and WebView2 remote debugging reached through the SSH tunnel. The per-row results are in the [manual test plan](manual-test-plan.md); in short:
+- **Pass:** USAGE-02, 04, 05, 06, 09 (a) to (d), 10, 11, 12, 13, 14 and 15. The capture saw connection attempts with sharing on, and none while undecided, declined or after turning off.
+- **Edition:** the standard report shows the three `app_open` events of 2026-11-15, 11:00 with `edition` = `store`, `app_version` = `0.7.1` and operating system Windows (reviewer item M6-3b).
+- **Partial:** USAGE-03. The first ask fit at the minimum size, but the review dialog's states weren't checked one by one at that size.
+- **Skipped by the account owner's choice (2026-11-12):** the Narrator rows USAGE-07 and 08, as VoiceOver was accepted as partial. The owner also chose not to add GA annotations for test windows.
+- **Asset bytes:** before cleanup, SHA-256 hashes of the five sample asset files matched the baseline taken before the first launch. Only `Animals/.asset-tags.json` changed, from the tag edits the rows asked for.
+
+Deviations:
+- The first attempt to remove the pin didn't take effect, so the pin and capture stayed in place until 2026-11-15, about 11:15. No row depended on that.
+- The account owner also installed the test package in their main account. Its use there with sharing on sent the real events noted under the test-event table above.
+
+Cleanup: the test package and its app data were removed from the test account, and the disposable libraries were deleted. The test certificate stays installed until a Store release replaces the test package in the owner's main account, because removing it earlier could stop that copy from opening.
+
+Google Analytics follow-up for T18: the standard report for 2026-11-12 shows only `edition` = `github`, `app_version` = `0.7.1` on macOS. That is 18 events from 2 users at 01:00, 1 event at 10:00 and 4 events from 1 user at 11:00, which matches the test windows above.
