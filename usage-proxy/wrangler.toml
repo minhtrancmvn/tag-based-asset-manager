@@ -1,0 +1,36 @@
+# Cloudflare Worker for opt-in usage analytics: docs/design/usage-analytics.md.
+# Wrangler 4.154.0 (published 2026-10-27), run without adding it to the app lockfile:
+#   pnpm dlx --allow-build=esbuild --allow-build=workerd wrangler@4.154.0 \
+#     deploy --config usage-proxy/wrangler.toml
+# pnpm 12 blocks those two packages' install scripts unless allowed by name.
+# GA_API_SECRET is a Worker secret, set with `wrangler secret put GA_API_SECRET`
+# at its prompt. It never goes in this file, a command argument or the repo.
+name = "tag-asset-manager-usage"
+main = "src/worker.mjs"
+compatibility_date = "2026-10-20"
+workers_dev = false
+preview_urls = false
+# Custom domain on the owner's own Cloudflare zone (minhtran.id.vn). Cloudflare creates
+# the DNS record and certificate; the hostname must not already have a DNS record.
+routes = [
+  { pattern = "usage.minhtran.id.vn", custom_domain = true },
+]
+
+# Keep observability off: incoming requests carry client IPs, and the outbound
+# request URL carries the GA api_secret in its query string.
+[observability]
+enabled = false
+
+[vars]
+GA_MEASUREMENT_ID = "G-3R72WXR2D5"
+# Kill switch: only the exact value "on" forwards to Google; anything else drops
+# valid events with 204. A rollback restores that version's value too.
+FORWARD = "on"
+
+[[ratelimits]]
+name = "USAGE_RATE_LIMIT"
+namespace_id = "7301"
+
+  [ratelimits.simple]
+  limit = 600
+  period = 60

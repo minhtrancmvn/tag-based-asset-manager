@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
-  AppError, Asset, RenameApplyResult, RenameCollision, RenameDiscardReason, RenameMapping, RenameOutcome, RenamePreview, RenamePreviewOutcome,
+  AppError, Asset, RenameApplyResult, UsageConsentResult, UsageSummary, RenameCollision, RenameDiscardReason, RenameMapping, RenameOutcome, RenamePreview, RenamePreviewOutcome,
   RenamePreviewRequest, RenameSavedSearchReplacement, RenameSkippedRow, RenameTargetSummary, SavedSearch, ScanIssue, ScanProgress, ScanResult, SearchFilters,
 } from "./types";
 
@@ -137,6 +137,20 @@ describe("native DTO bridge", () => {
   it("applies a tag rename by library ID and opaque preview ID only", async () => {
     await nativeClient.applyTagRename("root1", "preview-1");
     expect(mocks.invoke.mock.calls).toEqual([["apply_tag_rename", { libraryId: "root1", previewId: "preview-1" }]]);
+  });
+  it("sends the consent choice and the usage event under their pinned argument names", async () => {
+    mocks.invoke.mockResolvedValueOnce({ status: "busy" });
+    expect(await nativeClient.setUsageConsent("granted")).toEqual({ status: "busy" });
+    await nativeClient.setUsageConsent("declined");
+    mocks.invoke.mockResolvedValueOnce(undefined);
+    expect(await nativeClient.trackUsage({ name: "theme_change", theme: "workshop" })).toBeUndefined();
+    await nativeClient.trackUsage({ name: "tag_edit" });
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["set_usage_consent", { consent: "granted" }],
+      ["set_usage_consent", { consent: "declined" }],
+      ["track_usage", { event: { name: "theme_change", theme: "workshop" } }],
+      ["track_usage", { event: { name: "tag_edit" } }],
+    ]);
   });
   it("cancels a running rename preview through the existing scan cancellation", async () => {
     expect(Object.keys(nativeClient).filter((key) => /cancel/i.test(key))).toEqual(["cancelScan"]);
@@ -339,5 +353,50 @@ describe("tag-rename golden DTO fixture", () => {
     expect(fixture.applyPartial.failingSidecar).toBe("Models/.asset-tags.json");
     expect(fixture.applyComplete.error).toBeNull();
     expect(fixture.applySettingsFailed.queryMigrated).toBe(false);
+  });
+});
+
+// Golden consent result fixture: shared with the Rust command handler test. A new key or status here
+// must fail until the TypeScript result type and this check are updated together.
+const usageSummaryShape: KeyShape<UsageSummary> = { available: true, consent: true, saved: true };
+const consentResultShape: KeyShape<UsageConsentResult> = { status: true, usage: false, reason: false };
+const usageConsents: Record<UsageSummary["consent"], true> = { undecided: true, granted: true, declined: true };
+const consentStatuses: Record<UsageConsentResult["status"], true> = { saved: true, busy: true, failed: true, stoppedNotSaved: true };
+const consentReasons: Record<NonNullable<UsageConsentResult["reason"]>, true> = { busy: true, failed: true };
+
+function checkConsentResult(value: unknown, label: string): UsageConsentResult {
+  const result = expectExactKeys<UsageConsentResult>(value, consentResultShape, label);
+  expect(Object.keys(consentStatuses), `${label}: status`).toContain(result.status);
+  const hasUsage = result.status === "saved" || result.status === "stoppedNotSaved";
+  expect("usage" in result, `${label}: usage only on saved and stoppedNotSaved`).toBe(hasUsage);
+  if (hasUsage) {
+    const usage = expectExactKeys<UsageSummary>(result.usage, usageSummaryShape, `${label}.usage`);
+    expect(typeof usage.available, `${label}.usage.available`).toBe("boolean");
+    expect(Object.keys(usageConsents), `${label}.usage.consent`).toContain(usage.consent);
+    expect(typeof usage.saved, `${label}.usage.saved`).toBe("boolean");
+    expect(usage.saved, `${label}.usage.saved matches status`).toBe(result.status === "saved");
+  }
+  expect("reason" in result, `${label}: reason only on stoppedNotSaved`).toBe(result.status === "stoppedNotSaved");
+  if (result.reason !== undefined) expect(Object.keys(consentReasons), `${label}: reason`).toContain(result.reason);
+  return result;
+}
+
+describe("usage consent result fixture", () => {
+  const consentFixture = JSON.parse(readFileSync(new URL("../fixtures/usage-consent-result.json", import.meta.url), "utf8")) as Record<string, unknown>;
+  it("holds exactly the four results, each matching the TypeScript result type", () => {
+    expect(Object.keys(consentFixture)).toEqual(["saved", "busy", "failed", "stoppedNotSaved"]);
+    const results = Object.fromEntries(Object.entries(consentFixture).map(([name, value]) => [name, checkConsentResult(value, name)]));
+    expect(Object.values(results).map((result) => result.status)).toEqual(["saved", "busy", "failed", "stoppedNotSaved"]);
+    expect(results.stoppedNotSaved?.reason).toBe("busy");
+  });
+  it("rejects an unknown key, an unknown status and misplaced usage or reason", () => {
+    expect(() => checkConsentResult({ status: "busy", extra: 1 }, "extra key")).toThrow();
+    expect(() => checkConsentResult({ status: "pending" }, "unknown status")).toThrow();
+    expect(() => checkConsentResult({ status: "busy", usage: { available: true, consent: "declined", saved: true } }, "usage on busy")).toThrow();
+    expect(() => checkConsentResult({ status: "saved" }, "saved without usage")).toThrow();
+    expect(() => checkConsentResult({ status: "saved", usage: { available: true, consent: "declined", saved: true }, reason: "busy" }, "reason on saved")).toThrow();
+    expect(() => checkConsentResult({ status: "stoppedNotSaved", usage: { available: true, consent: "declined", saved: false } }, "stopped without reason")).toThrow();
+    expect(() => checkConsentResult({ status: "stoppedNotSaved", usage: { available: true, consent: "declined", saved: false }, reason: "denied" }, "bad reason")).toThrow();
+    expect(() => checkConsentResult({ status: "saved", usage: { available: true, consent: "declined", saved: true, extra: 1 } }, "usage extra key")).toThrow();
   });
 });

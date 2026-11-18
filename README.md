@@ -110,6 +110,8 @@ Run the desktop shell after installing platform prerequisites:
 pnpm tauri dev
 ```
 
+Release builds run one copy of the app at a time: opening the app again brings the existing window forward. `pnpm tauri dev` is not limited this way.
+
 ## Checks and production build
 
 ```sh
@@ -196,7 +198,7 @@ Team roles:
 - Committers and reviewers: [Minh Tran](https://github.com/minhtrancmvn)
 - Approvers: [Minh Tran](https://github.com/minhtrancmvn)
 
-Privacy policy: updater-enabled desktop builds check the public GitHub-hosted preview manifest once per launch and on **Check for updates**. Requests expose ordinary network metadata such as IP address and updater user agent, but never library paths, asset names, tags, notes or settings. Package downloads occur only after **Download and install** confirmation. Builds without an embedded updater public key make no updater requests. Other native library operations remain local.
+Privacy policy: updater-enabled desktop builds check the public GitHub-hosted preview manifest once per launch and on **Check for updates**. Requests expose ordinary network metadata such as IP address and updater user agent, but never library paths, asset names, tags, notes or settings. Package downloads occur only after **Download and install** confirmation. Builds without an embedded updater public key make no updater requests. Other native library operations remain local. Usage data is off by default. If the user opts in, named interaction events go through a Cloudflare Worker to Google Analytics; file names, paths, tags, notes and search text are never sent.
 
 ## License
 

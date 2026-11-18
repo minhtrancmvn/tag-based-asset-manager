@@ -64,9 +64,9 @@ jobs:
           pnpm install --frozen-lockfile 2>&1 | Tee-Object ci-logs/install.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Release version script tests
+      - name: Node script and usage Worker tests
         run: |
-          node --test 'scripts/*.test.mjs' 2>&1 | Tee-Object ci-logs/release-version-tests.log
+          node --test 'scripts/*.test.mjs' 'usage-proxy/*.test.mjs' 2>&1 | Tee-Object ci-logs/node-script-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Frontend tests
